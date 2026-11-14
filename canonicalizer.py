@@ -238,6 +238,7 @@ class Canonicalizer:
         # Via 3: fallback — nome novo, fica como está
         return nome, Decisao(tipo, nome, nome, "fallback")
 
+'''
     def _registar_fusao(self, tipo: str, canonical: str, raw: str, decisao: Decisao):
         """Garante que `raw` fica como alias de `canonical` no dicionário em memória."""
         if self.aprender_aliases and norm(raw) != norm(canonical):
@@ -246,7 +247,17 @@ class Canonicalizer:
                 entry.append(raw)
             self._lookup.setdefault(tipo, {})[norm(raw)] = canonical
         self._decisoes.append(decisao)
-
+'''
+    def _registar_fusao(self, tipo: str, canonical: str, raw: str, decisao: Decisao):
+        if self.aprender_aliases and norm(raw) != norm(canonical):
+           entry = self._dict.setdefault(tipo, {}).setdefault(canonical, [])
+           # Só grava se não houver já um alias equivalente após normalização
+           existentes_norm = {norm(a) for a in entry} | {norm(canonical)}
+           if norm(raw) not in existentes_norm:
+              entry.append(raw)
+           self._lookup.setdefault(tipo, {})[norm(raw)] = canonical
+        self._decisoes.append(decisao)
+        
     # ------------------------------------------------------------------
     # API por tipo — pessoas
     # ------------------------------------------------------------------
