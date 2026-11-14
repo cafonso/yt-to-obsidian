@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "blurt": {
+      "source": "AGIHunt/blurt",
+      "sourceType": "github",
+      "skillPath": "skills/blurt/SKILL.md",
+      "computedHash": "945ebd24e54e2c94fd1426e1c998ca83024b0c4e94673c26fc3349ab284bf6cc"
+    },
+    "blurt-dictation-review": {
+      "source": "AGIHunt/blurt",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/blurt-dictation-review/SKILL.md",
+      "computedHash": "7a0421da8e8e183ff661bc8466b053818fd26e7f4dd528adfc0be6701ad61860"
+    }
+  }
+}

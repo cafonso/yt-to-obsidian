@@ -1,0 +1,42 @@
+# Ambientes virtuais
+.venv/
+venv/
+env/
+ENV/
+
+# Python cache & compilação
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Ficheiros temporários de áudio/vídeo
+temp_audio_*
+*.m4a
+*.mp3
+*.mp4
+*.wav
+
+# Ficheiros de configuração local e chaves
+.env
+cookies.txt
+*.token
+
+# Ficheiros de arquivo e backups locais
+*.zip
+*.rar
+*.tar.gz
+conversa_transcritor_youtube.zip
+yt.rar
+yt.zip
+yt/
+
+# Estado / histórico pessoal local
+historico_processados.json
+
+# Sistema Operativo & IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.agents/
