@@ -1,19 +1,8 @@
 import os
 import sys
-import argparse
-from pathlib import Path
-
-# Garante suporte a UTF-8 no terminal Windows para emojis e acentos
-if hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
-
-import os
-import sys
+import re
 import json
+import datetime
 import argparse
 from pathlib import Path
 
@@ -44,7 +33,10 @@ def carregar_historico() -> dict:
 def gravar_historico(historico: dict):
     HISTORICO_FILE.write_text(json.dumps(historico, indent=2, ensure_ascii=False), encoding="utf-8")
 
-def processar_um_video(url: str, extractor: YouTubeExtractor, analyzer: VideoAnalyzer, writer: ObsidianVaultWriter, forcar: bool = False) -> bool:
+def processar_um_video(url: str, extractor: YouTubeExtractor, analyzer: VideoAnalyzer, writer: ObsidianVaultWriter, forcar: bool = False, data_leitura: str = None) -> bool:
+    if not data_leitura:
+        data_leitura = datetime.date.today().isoformat()
+
     video_id = extrair_id_youtube(url)
     historico = carregar_historico()
 
@@ -75,7 +67,7 @@ def processar_um_video(url: str, extractor: YouTubeExtractor, analyzer: VideoAna
         print(f"    ✓ Temas: {len(analise.temas)}")
 
         print("3/3 📁 A gerar teia de notas no Obsidian Vault...")
-        caminho_nota = writer.salvar_video(dados_video, analise)
+        caminho_nota = writer.salvar_video(dados_video, analise, data_leitura)
         print(f"    ✓ Nota do vídeo criada em: {caminho_nota}")
 
         # Regista no histórico para não repetir custos de API desnecessários
@@ -84,6 +76,7 @@ def processar_um_video(url: str, extractor: YouTubeExtractor, analyzer: VideoAna
                 "titulo": analise.titulo_sugerido,
                 "canal": dados_video.get("canal"),
                 "url": url,
+                "data_leitura": data_leitura,
                 "nota": str(caminho_nota)
             }
             gravar_historico(historico)
@@ -100,16 +93,35 @@ def processar_ficheiro_lista(caminho_lista: str, extractor: YouTubeExtractor, an
         print(f"Erro: O ficheiro '{caminho_lista}' não foi encontrado.")
         return
 
-    with open(caminho_lista, "r", encoding="utf-8") as f:
-        urls = [linha.strip() for linha in f.readlines() if linha.strip() and not linha.startswith("#")]
+    # Parser que suporta cabeçalhos de data: # YYYY-MM-DD
+    # Todos os outros comentários (# texto livre) são ignorados normalmente.
+    PADRAO_DATA = re.compile(r'^#\s*(\d{4}-\d{2}-\d{2})\s*$')
+    data_leitura_atual = datetime.date.today().isoformat()  # default: hoje
+    entradas = []  # lista de (url, data_leitura)
 
-    total = len(urls)
+    with open(caminho_lista, "r", encoding="utf-8") as f:
+        for linha in f:
+            linha = linha.strip()
+            if not linha:
+                continue
+            match_data = PADRAO_DATA.match(linha)
+            if match_data:
+                # Cabeçalho de data — atualiza o contexto temporal
+                data_leitura_atual = match_data.group(1)
+                print(f"📅 Contexto de data alterado para: {data_leitura_atual}")
+            elif linha.startswith("#"):
+                # Comentário livre — ignora
+                continue
+            else:
+                entradas.append((linha, data_leitura_atual))
+
+    total = len(entradas)
     print(f"\n📋 Foram encontrados {total} vídeos para processar em lote.\n")
 
     sucessos = 0
-    for idx, url in enumerate(urls, 1):
+    for idx, (url, data_leitura) in enumerate(entradas, 1):
         print(f"\n[{idx}/{total}]")
-        if processar_um_video(url, extractor, analyzer, writer, forcar=forcar):
+        if processar_um_video(url, extractor, analyzer, writer, forcar=forcar, data_leitura=data_leitura):
             sucessos += 1
 
     print(f"\n=======================================================")

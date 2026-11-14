@@ -150,7 +150,7 @@ tags:
             conteudo_atual = self._adicionar_link_se_nao_existir(conteudo_atual, "### 📹 Vídeos sobre este tema:", video_link)
             caminho.write_text(conteudo_atual, encoding="utf-8")
 
-    def formatar_entrada_diario(self, dados_video: Dict[str, Any], video_wikilink: str) -> str:
+    def formatar_entrada_diario(self, dados_video: Dict[str, Any], video_wikilink: str, data_leitura: str) -> str:
         """Gera o bloco de entrada no diário exatamente no formato personalizado do utilizador."""
         canal_id = dados_video.get("canal_id")
         canal_str = f"{dados_video.get('canal')} (ID: {canal_id})" if canal_id else dados_video.get('canal')
@@ -162,21 +162,22 @@ tags:
 Título: {dados_video.get('titulo')}
 Canal: {canal_str}
 Data de Publicação: {dados_video.get('data')}
+Data de Leitura: {data_leitura}
 Link: {dados_video.get('url')}
 
 --- Descrição ---
 {descricao}
 """
 
-    def atualizar_nota_diaria(self, dados_video: Dict[str, Any], video_wikilink: str, analise: AnaliseVideo):
-        """Regista o bloco do vídeo no diário (YYYY-MM-DD.md) exatamente no formato habitual do utilizador, sem apagar nada."""
-        data_str = dados_video.get("data")
-        if not data_str or len(data_str) != 10 or "-" not in data_str:
-            import datetime
-            data_str = datetime.date.today().isoformat()
+    def atualizar_nota_diaria(self, dados_video: Dict[str, Any], video_wikilink: str, analise: AnaliseVideo, data_leitura: str = None):
+        """Regista o bloco do vídeo no diário (YYYY-MM-DD.md) usando a data de leitura (quando viste),
+        não a data de publicação do vídeo."""
+        import datetime
+        if not data_leitura:
+            data_leitura = datetime.date.today().isoformat()
 
-        caminho_diario = self.vault_path / f"{data_str}.md"
-        bloco_novo = self.formatar_entrada_diario(dados_video, video_wikilink)
+        caminho_diario = self.vault_path / f"{data_leitura}.md"
+        bloco_novo = self.formatar_entrada_diario(dados_video, video_wikilink, data_leitura)
 
         if caminho_diario.exists():
             conteudo = caminho_diario.read_text(encoding="utf-8")
@@ -191,20 +192,24 @@ Link: {dados_video.get('url')}
                 novo_conteudo, count = re.subn(padrao, substituicao, conteudo, count=1)
                 if count > 0:
                     caminho_diario.write_text(novo_conteudo, encoding="utf-8")
-                    print(f"    ✓ Diário {data_str}.md atualizado com o bloco de metadados antes da resenha.")
+                    print(f"    ✓ Diário {data_leitura}.md atualizado com o bloco de metadados antes da resenha.")
                     return
 
             # Caso contrário, acrescenta no fim do diário
             novo_conteudo = conteudo.rstrip() + f"\n\n{bloco_novo}\n"
             caminho_diario.write_text(novo_conteudo, encoding="utf-8")
-            print(f"    ✓ Diário {data_str}.md atualizado com o novo bloco de metadados.")
+            print(f"    ✓ Diário {data_leitura}.md atualizado com o novo bloco de metadados.")
         else:
             # Cria a nota diária já com o bloco
             caminho_diario.write_text(bloco_novo + "\n", encoding="utf-8")
-            print(f"    ✓ Diário {data_str}.md criado com o bloco de metadados.")
+            print(f"    ✓ Diário {data_leitura}.md criado com o bloco de metadados.")
 
-    def salvar_video(self, dados_video: Dict[str, Any], analise: AnaliseVideo) -> Path:
+    def salvar_video(self, dados_video: Dict[str, Any], analise: AnaliseVideo, data_leitura: str = None) -> Path:
         """Cria a nota principal do vídeo e dispara a criação/atualização de todas as entidades conectadas."""
+        import datetime
+        if not data_leitura:
+            data_leitura = datetime.date.today().isoformat()
+
         # Usa o título original limpo diretamente para o nome da nota (sem prefixar a data)
         nome_base = limpar_nome_ficheiro(analise.titulo_sugerido or dados_video.get("titulo", "Video"))
         nome_ficheiro = f"{nome_base}.md"
@@ -221,11 +226,20 @@ Link: {dados_video.get('url')}
         temas_links = [f"[[{limpar_nome_ficheiro(t)}]]" for t in analise.temas]
 
         # Markdown da nota do vídeo
+        # Se a nota já existir, preserva o data_leitura original (quando viu pela 1ª vez)
+        data_leitura_final = data_leitura
+        if caminho_video.exists():
+            conteudo_existente = caminho_video.read_text(encoding="utf-8")
+            match = re.search(r'^data_leitura:\s*"?([0-9]{4}-[0-9]{2}-[0-9]{2})"?', conteudo_existente, re.MULTILINE)
+            if match:
+                data_leitura_final = match.group(1)
+
         nota = f"""---
 tipo: video
 titulo: "{dados_video.get('titulo')}"
 canal: "{dados_video.get('canal')}"
 data_publicacao: "{dados_video.get('data')}"
+data_leitura: "{data_leitura_final}"
 url: "{dados_video.get('url')}"
 tags:
   - video/youtube
@@ -305,7 +319,7 @@ obras: {obras_links}
         caminho_video.write_text(nota, encoding="utf-8")
 
         # Regista automaticamente a chamada deste vídeo na Nota Diária (YYYY-MM-DD.md)
-        self.atualizar_nota_diaria(dados_video, video_wikilink, analise)
+        self.atualizar_nota_diaria(dados_video, video_wikilink, analise, data_leitura_final)
 
         # Propaga as ligações para todas as entidades relacionadas
         for p in analise.pessoas:
