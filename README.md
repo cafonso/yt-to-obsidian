@@ -24,7 +24,7 @@ Para cada vídeo processado, é criada uma página estruturada em `Videos/` com:
 
 ## 📅 Integração com o Diário (`YYYY-MM-DD.md`)
 
-* O script deteta a data do vídeo e localiza o teu ficheiro diário (ex: `2026-11-07.md`).
+* O script regista a entrada no diário na **data de visualização** (data de hoje por defeito, ou a data indicada na lista com cabeçalho `# YYYY-MM-DD`), mantendo no metadado do vídeo a data original de publicação.
 * **Preservação Total:** Nunca apaga o que já escreveste manualmente no diário.
 * Injeta de forma cirúrgica uma secção:
   ```markdown
@@ -50,6 +50,8 @@ uv run python main.py --lista lista_de_videos.txt
 
 # 4. Forçar reprocessamento de vídeos anteriores com as novas regras
 uv run python main.py --lista lista_de_videos.txt --forcar
+
+# 5. Se a lista tiver uma linha com data (# YYYY-MM-DD), essa será considerada a data da entrada no diário
 ```
 
 ---
@@ -76,4 +78,3 @@ Se o YouTube bloquear o teu IP no endpoint de legendas:
 | **Nova secção "Estrutura do Vault"** | Inclui `Artefactos/` e `Organizações/`. |
 | **Nova secção "Variáveis de Ambiente"** | Tabela com `OBSIDIAN_VAULT_PATH` e `GEMINI_MODEL`. |
 | **Nova secção "Limitações Conhecidas"** | Honestidade sobre falsos positivos e dependência de áudio. |
-
