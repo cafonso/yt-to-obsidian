@@ -14,5 +14,3 @@
 | **Nova secção "Estrutura do Vault"** | Inclui `Artefactos/` e `Organizações/`. |
 | **Nova secção "Variáveis de Ambiente"** | Tabela com `OBSIDIAN_VAULT_PATH` e `GEMINI_MODEL`. |
 | **Nova secção "Limitações Conhecidas"** | Honestidade sobre falsos positivos e dependência de áudio. |
-
-Nota: retirei a secção "Fornecedor de LLM" que tinha proposto antes, porque ainda estás em fase de discussão e não há código implementado para isso — não faria sentido documentar algo que não existe. Quando avança­res com a abstração, acrescenta-se.
