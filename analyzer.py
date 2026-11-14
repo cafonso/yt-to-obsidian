@@ -7,7 +7,60 @@ from models import AnaliseVideo, SegmentoAnalise, SinteseGlobal, PessoaMencionad
 import config
 from extractor import formatar_tempo
 from canonicalizer import Canonicalizer
+import random
+import re
 
+def _extrair_retry_after(erro_str: str) -> Optional[float]:
+    """
+    Tenta extrair um valor de Retry-After (segundos) da mensagem de erro.
+    O SDK do google-genai às vezes inclui o header na string de exceção.
+    Devolve None se não encontrar.
+    """
+    # Formatos comuns: "retry_after: 30", "Retry-After: 30", "retryDelay: 30s"
+    m = re.search(r'retry[_\- ]?after\s*[:=]\s*"?(\d+(?:\.\d+)?)\s*s?"?', erro_str, re.IGNORECASE)
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+def _calcular_espera(tentativa: int, erro_str: str) -> float:
+    """
+    Calcula o intervalo de espera para a tentativa N (1-indexed).
+
+    - Se o erro for 429, usa base específica (mais longa).
+    - Se for 503, usa base específica (mais curta).
+    - Caso contrário, usa a base geral.
+    - Aplica exponencial 2^(tentativa-1), limitada ao teto.
+    - Aplica jitter ±GEMINI_BACKOFF_JITTER.
+    - Respeita Retry-After se presente e a flag estiver ligada.
+    """
+    erro_lower = erro_str.lower()
+
+    if "429" in erro_str or "resource_exhausted" in erro_lower:
+        base = config.GEMINI_BACKOFF_BASE_429
+    elif "503" in erro_str or "unavailable" in erro_lower:
+        base = config.GEMINI_BACKOFF_BASE_503
+    else:
+        base = config.GEMINI_BACKOFF_BASE_SEGUNDOS
+
+    espera = base * (2 ** (tentativa - 1))
+    espera = min(espera, config.GEMINI_BACKOFF_TETO_SEGUNDOS)
+
+    # Jitter multiplicativo (±20% por defeito)
+    if config.GEMINI_BACKOFF_JITTER > 0:
+        fator = 1.0 + random.uniform(-config.GEMINI_BACKOFF_JITTER, config.GEMINI_BACKOFF_JITTER)
+        espera = max(1.0, espera * fator)
+
+    # Retry-After explícito do servidor tem prioridade (mas respeita o teto)
+    if config.GEMINI_RESPEITAR_RETRY_AFTER:
+        ra = _extrair_retry_after(erro_str)
+        if ra is not None:
+            espera = min(ra, config.GEMINI_BACKOFF_TETO_SEGUNDOS)
+
+    return espera
 
 def eh_nome_valido_pessoa(nome: str) -> bool:
     if not nome or not nome.strip():
@@ -31,7 +84,7 @@ def desduplicar_strings(lista: List[str]) -> List[str]:
             resultado.append(item_limpo)
     return resultado
 
-
+    
 class VideoAnalyzer:
     def __init__(self, model_name: str = None):
         self.model_name = model_name or config.MODELO_GEMINI
@@ -39,23 +92,34 @@ class VideoAnalyzer:
         # Usamos v1beta para suporte completo a JSON schema com Pydantic
         self.client = genai.Client(http_options={'api_version': 'v1beta'})
 
-    def _chamar_gemini_com_retry(self, modelo: str, conteudos: list, config_obj: types.GenerateContentConfig, max_tentativas: int = 3):
+    def _chamar_gemini_com_retry(self, modelo: str, conteudos: list, config_obj: types.GenerateContentConfig, max_tentativas: int = None):
+        if max_tentativas is None:
+            max_tentativas = config.GEMINI_MAX_TENTATIVAS
+
         for tentativa in range(1, max_tentativas + 1):
             try:
                 return self.client.models.generate_content(
                     model=modelo,
                     contents=conteudos,
-                    config=config_obj
+                    config=config_obj,
                 )
             except Exception as e:
                 erro_str = str(e)
-                if "503" in erro_str or "UNAVAILABLE" in erro_str or "429" in erro_str:
-                    if tentativa < max_tentativas:
-                        espera = tentativa * 4
-                        print(f"    ⚠️ Modelo sobrecarregado (503/429). A tentar novamente em {espera}s (tentativa {tentativa}/{max_tentativas})...")
-                        time.sleep(espera)
-                        continue
-                raise e
+                transitorio = (
+                    "503" in erro_str
+                    or "UNAVAILABLE" in erro_str
+                    or "429" in erro_str
+                    or "RESOURCE_EXHAUSTED" in erro_str
+                )
+                if not transitorio or tentativa >= max_tentativas:
+                    raise e
+
+                espera = _calcular_espera(tentativa, erro_str)
+                print(
+                    f"    ⚠️ Erro transitório ({'429' if '429' in erro_str else '503'}). "
+                    f"A aguardar {espera:.1f}s antes da tentativa {tentativa + 1}/{max_tentativas}..."
+                )
+                time.sleep(espera)
 
     def _fatiar_transcricao(self, blocos: List[Dict[str, Any]], capitulos_originais: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         """Divide a transcrição em segmentos temporais (~30 minutos) respeitando capítulos se existirem."""

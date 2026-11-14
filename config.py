@@ -50,3 +50,24 @@ CANON_APRENDER_ALIASES = os.environ.get("CANON_APRENDER_ALIASES", "1") == "1"
 # Se True, escreve revisao.md (pares ambíguos) e decisoes.jsonl (auditoria).
 CANON_ESCREVER_REVISAO = os.environ.get("CANON_ESCREVER_REVISAO", "1") == "1"
 CANON_ESCREVER_DECISOES = os.environ.get("CANON_ESCREVER_DECISOES", "1") == "1"
+
+# ---------------------------------------------------------------------------
+# Retry / backoff nas chamadas ao Gemini
+# ---------------------------------------------------------------------------
+
+# Número máximo de tentativas por chamada (inclui a primeira).
+GEMINI_MAX_TENTATIVAS = int(os.environ.get("GEMINI_MAX_TENTATIVAS", 5))
+
+# Backoff exponencial: espera = base * 2^(tentativa-1), limitada ao teto.
+GEMINI_BACKOFF_BASE_SEGUNDOS = float(os.environ.get("GEMINI_BACKOFF_BASE", 5.0))
+GEMINI_BACKOFF_TETO_SEGUNDOS = float(os.environ.get("GEMINI_BACKOFF_TETO", 120.0))
+
+# Jitter (fração aleatória adicionada/subtraída) para evitar thundering herd.
+GEMINI_BACKOFF_JITTER = float(os.environ.get("GEMINI_BACKOFF_JITTER", 0.2))
+
+# Bases específicas por tipo de erro (opcional; se None, usa a base geral).
+GEMINI_BACKOFF_BASE_429 = float(os.environ.get("GEMINI_BACKOFF_BASE_429", 15.0))
+GEMINI_BACKOFF_BASE_503 = float(os.environ.get("GEMINI_BACKOFF_BASE_503", 5.0))
+
+# Se True, tenta ler o header Retry-After da resposta e respeitá-lo.
+GEMINI_RESPEITAR_RETRY_AFTER = os.environ.get("GEMINI_RESPEITAR_RETRY_AFTER", "1") == "1"
