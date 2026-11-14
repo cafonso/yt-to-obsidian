@@ -1,9 +1,29 @@
-from typing import List, Optional
+from typing import List, Optional, Literal
 from pydantic import BaseModel, Field
+
+# Subtipos válidos para artefactos
+SubtipoArtefacto = Literal[
+    "modelo", "framework", "ferramenta", "agente",
+    "tecnica", "hardware", "plataforma", "dataset",
+]
 
 class PessoaMencionada(BaseModel):
     nome: str = Field(description="Nome completo da pessoa citada ou interveniente.")
     papel_ou_bio: str = Field(description="Mini-biografia ou papel/relevância desta pessoa no contexto abordado.")
+
+class ArtefactoIA(BaseModel):
+    nome: str = Field(description="Nome oficial do artefacto (ex: 'GPT-4o', 'LangChain', 'H100 SXM5').")
+    subtipo: SubtipoArtefacto = Field(
+        description="Um de: 'modelo', 'framework', 'ferramenta', 'agente', 'tecnica', 'hardware', 'plataforma', 'dataset'."
+    )
+    fabricante_ou_autor: Optional[str] = Field(
+        None,
+        description="Empresa, organização ou pessoa que criou o artefacto (ex: 'OpenAI', 'Google DeepMind', 'NVIDIA'). None se desconhecido."
+    )
+    descricao: Optional[str] = Field(
+        None,
+        description="Papel ou relevância do artefacto no contexto específico do vídeo (1-2 frases em português)."
+    )
 
 class ObraCitada(BaseModel):
     titulo: str = Field(description="Título oficial da obra na língua original (NUNCA traduzir, ex: 'Thinking, Fast and Slow', 'Attention Is All You Need').")
@@ -24,3 +44,4 @@ class AnaliseVideo(BaseModel):
     pessoas: List[PessoaMencionada] = Field(default_factory=list, description="Pessoas relevantes citadas ou presentes no vídeo com nome completo.")
     obras: List[ObraCitada] = Field(default_factory=list, description="Livros, artigos, papers e ensaios citados no vídeo com títulos originais e autores.")
     organizacoes: List[str] = Field(default_factory=list, description="Empresas, instituições, universidades ou entidades mencionadas.")
+    artefactos: List[ArtefactoIA] = Field(default_factory=list, description="Modelos de IA, frameworks, ferramentas, agentes, técnicas, hardware especializado, plataformas e datasets mencionados no vídeo.")

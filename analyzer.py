@@ -57,6 +57,7 @@ INSTRUÇÕES ESPECÍFICAS DE EXTRAÇÃO:
 0. REGRA ESTRITA DE IDIOMAS E TÍTULOS (MUITO IMPORTANTE):
    - TÍTULOS DE VÍDEOS: Mantém SEMPRE o título na sua língua original (geralmente em inglês). NUNCA traduzas o título do vídeo para português! Apenas remove emojis excessivos ou CAPS LOCK de clickbait (ex: "NEW Claude Model LEAKED?!" -> "New Claude Model Leaked").
    - TÍTULOS DE OBRAS (Livros, Artigos, Papers): Mantém SEMPRE o título original oficial na língua de publicação (ex: 'Thinking, Fast and Slow', 'Attention Is All You Need', 'The Stacks Project'). NUNCA traduzas títulos de livros ou papers!
+   - NOMES DE ARTEFACTOS: Mantém SEMPRE o nome oficial (ex: 'GPT-4o', 'Claude 3.5 Sonnet', 'H100 SXM5', 'LoRA'). NUNCA traduzas nem abras nomes de modelos/ferramentas.
    - TEMAS: Usa a terminologia técnica padrão original (geralmente em inglês, ex: 'Artificial Intelligence', 'Agentic Context', 'Large Language Models', 'Reinforcement Learning'). Se quiseres incluir a tradução portuguesa, coloca-a OBRIGATORIAMENTE entre parênteses (ex: 'Agentic Context (Contexto Agêntico)'). NUNCA uses termos isolados em português do Brasil.
    - SÍNTESE: O resumo executivo, takeaways e bios devem ser redigidos em português claro, formal e correto (PT-PT).
 
@@ -71,8 +72,23 @@ INSTRUÇÕES ESPECÍFICAS DE EXTRAÇÃO:
 9. Pessoas (REGRA DO NOME COMPLETO):
    - Extrai APENAS figuras públicas, cientistas, autores, oradores ou executivos de relevância real com o seu NOME COMPLETO CANÓNICO.
    - NUNCA uses apenas o primeiro nome próprio solto (ex: NUNCA 'Sarah', 'Dom', 'Tim', 'Koen', 'Damien', 'Zach').
+   - NÃO coloques empresas ou organizações neste campo — vai para o campo 11.
 10. Livros, Artigos e Papers Citados: Obras citadas no título original com o(s) respetivo(s) autor(es).
-11. Organizações: Empresas, universidades, laboratórios ou instituições chave referidas.
+11. Organizações: Empresas, universidades, laboratórios ou instituições chave referidas (ex: 'OpenAI', 'Google DeepMind', 'NVIDIA', 'Anthropic', 'MIT', 'Hugging Face'). Usa o nome oficial e completo da organização.
+12. Artefactos (Modelos, Frameworks, Ferramentas, Agentes, Técnicas, Hardware, Plataformas, Datasets):
+   - Extrai TODOS os artefactos técnicos mencionados com o nome oficial (ex: 'GPT-4o', 'Claude 3.5 Sonnet', 'LangChain', 'Cursor', 'Devin', 'LoRA', 'RAG', 'H100', 'TPU v5', 'Hugging Face', 'MMLU').
+   - Classifica cada um num dos 8 subtipos: 'modelo', 'framework', 'ferramenta', 'agente', 'tecnica', 'hardware', 'plataforma', 'dataset'.
+   - Indica o fabricante/autor quando conhecido (ex: 'OpenAI', 'Anthropic', 'NVIDIA', 'Meta', 'Google DeepMind'). Deixa null se desconhecido.
+   - Para cada artefacto, escreve 1-2 frases em português sobre o seu papel/relevância NO CONTEXTO específico do vídeo.
+   - Distinção importante:
+     * 'ferramenta' = produto que o utilizador opera diretamente (ex: Cursor, Copilot, Perplexity, Obsidian).
+     * 'agente' = sistema autónomo que age por conta própria (ex: Devin, SWE-agent, AutoGPT, OpenHands).
+     * 'modelo' = modelo de IA de qualquer modalidade (LLM, imagem, áudio, vídeo).
+     * 'framework' = biblioteca/framework de desenvolvimento (ex: LangChain, PyTorch, JAX).
+     * 'tecnica' = método, algoritmo ou abordagem (ex: RAG, LoRA, RLHF, Chain-of-Thought, MoE).
+     * 'hardware' = silício e infraestrutura de compute (ex: H100, TPU v5, Apple M4, Groq LPU).
+     * 'plataforma' = serviço/ecossistema de deployment (ex: Hugging Face, Replicate, AWS Bedrock, Together AI).
+     * 'dataset' = conjunto de dados ou benchmark (ex: The Pile, LAION, MMLU, HumanEval).
 
 Responde estritamente de acordo com o esquema JSON fornecido.
 """
