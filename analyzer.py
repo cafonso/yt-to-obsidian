@@ -6,6 +6,8 @@ from google.genai import types
 from models import AnaliseVideo, SegmentoAnalise, SinteseGlobal, PessoaMencionada, ArtefactoIA, ObraCitada
 import config
 from extractor import formatar_tempo
+from canonicalizer import Canonicalizer
+
 
 def eh_nome_valido_pessoa(nome: str) -> bool:
     if not nome or not nome.strip():
@@ -13,58 +15,10 @@ def eh_nome_valido_pessoa(nome: str) -> bool:
     partes = nome.strip().split()
     return len(partes) >= 2
 
-def desduplicar_pessoas(pessoas: List[PessoaMencionada]) -> List[PessoaMencionada]:
-    vistas = {}
-    for p in pessoas:
-        nome_limpo = p.nome.strip()
-        if not eh_nome_valido_pessoa(nome_limpo):
-            continue
-        chave = nome_limpo.lower()
-        if chave not in vistas:
-            vistas[chave] = p
-        else:
-            if len(p.papel_ou_bio) > len(vistas[chave].papel_ou_bio):
-                vistas[chave] = p
-    return list(vistas.values())
-
-def desduplicar_artefactos(artefactos: List[ArtefactoIA]) -> List[ArtefactoIA]:
-    vistos = {}
-    for a in artefactos:
-        nome_limpo = a.nome.strip()
-        if not nome_limpo:
-            continue
-        chave = nome_limpo.lower()
-        if chave not in vistos:
-            vistos[chave] = a
-        else:
-            atual = vistos[chave]
-            if atual.subtipo == "modelo" and a.subtipo != "modelo":
-                atual.subtipo = a.subtipo
-            if not atual.fabricante_ou_autor and a.fabricante_ou_autor:
-                atual.fabricante_ou_autor = a.fabricante_ou_autor
-            if not atual.descricao and a.descricao:
-                atual.descricao = a.descricao
-            elif a.descricao and len(a.descricao) > len(atual.descricao or ""):
-                atual.descricao = a.descricao
-    return list(vistos.values())
-
-def desduplicar_obras(obras: List[ObraCitada]) -> List[ObraCitada]:
-    vistas = {}
-    for o in obras:
-        if not o.titulo or not o.titulo.strip():
-            continue
-        chave = o.titulo.strip().lower()
-        if chave not in vistas:
-            vistas[chave] = o
-        else:
-            atual = vistas[chave]
-            if not atual.autores and o.autores:
-                atual.autores = o.autores
-            if not atual.contexto and o.contexto:
-                atual.contexto = o.contexto
-    return list(vistas.values())
 
 def desduplicar_strings(lista: List[str]) -> List[str]:
+    """Deduplicação simples para textos livres (métricas, tensões, agenda, recursos).
+    Não usar para entidades — essas passam pelo Canonicalizer."""
     vistos = set()
     resultado = []
     for item in lista:
@@ -114,7 +68,7 @@ class VideoAnalyzer:
             segmentos = []
             chunk_caps = []
             duracao_acumulada = 0
-            
+
             for cap in capitulos_originais:
                 st = cap.get("start_time", 0)
                 et = cap.get("end_time", st)
@@ -320,6 +274,19 @@ Responde estritamente de acordo com o esquema JSON fornecido.
 
         sintese: SinteseGlobal = resp_sintese.parsed
 
+        # ------------------------------------------------------------------
+        # Canonicalização de entidades (substitui as desduplicar_* de entidades)
+        # ------------------------------------------------------------------
+        canon = Canonicalizer()
+
+        pessoas_canon = canon.canonicalizar_pessoas(todas_pessoas)
+        artefactos_canon = canon.canonicalizar_artefactos(todos_artefactos)
+        obras_canon = canon.canonicalizar_obras(todas_obras)
+        organizacoes_canon = canon.canonicalizar_strings("organizacao", todas_orgs)
+        temas_canon = canon.canonicalizar_strings("tema", todos_temas)
+
+        canon.gravar()  # persiste aliases.yaml, decisoes.jsonl, revisao.md
+
         return AnaliseVideo(
             titulo_sugerido=sintese.titulo_sugerido or dados_video.get('titulo'),
             resumo_executivo=sintese.resumo_executivo,
@@ -329,11 +296,11 @@ Responde estritamente de acordo com o esquema JSON fornecido.
             agenda_e_previsoes=desduplicar_strings(todas_agendas),
             recursos_e_links=desduplicar_strings(todos_recursos),
             capitulos=capitulos,
-            temas=desduplicar_strings(todos_temas),
-            pessoas=desduplicar_pessoas(todas_pessoas),
-            obras=desduplicar_obras(todas_obras),
-            organizacoes=desduplicar_strings(todas_orgs),
-            artefactos=desduplicar_artefactos(todos_artefactos)
+            temas=temas_canon,
+            pessoas=pessoas_canon,
+            obras=obras_canon,
+            organizacoes=organizacoes_canon,
+            artefactos=artefactos_canon
         )
 
     def analisar_video_longo(self, dados_video: Dict[str, Any]) -> AnaliseVideo:
@@ -448,7 +415,21 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         if not response or not response.parsed:
             raise ValueError("O Gemini não devolveu um resultado estruturado válido.")
 
-        return response.parsed
+        # ------------------------------------------------------------------
+        # Canonicalização de entidades (passo único também beneficia)
+        # ------------------------------------------------------------------
+        analise: AnaliseVideo = response.parsed
+        canon = Canonicalizer()
+
+        analise.pessoas = canon.canonicalizar_pessoas(analise.pessoas)
+        analise.artefactos = canon.canonicalizar_artefactos(analise.artefactos)
+        analise.obras = canon.canonicalizar_obras(analise.obras)
+        analise.organizacoes = canon.canonicalizar_strings("organizacao", analise.organizacoes)
+        analise.temas = canon.canonicalizar_strings("tema", analise.temas)
+
+        canon.gravar()
+
+        return analise
 
     def analisar(self, dados_video: Dict[str, Any]) -> AnaliseVideo:
         """Decide inteligentemente entre passo único (curtos) ou Map-Reduce (longos)."""

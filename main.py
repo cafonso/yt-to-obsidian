@@ -22,6 +22,7 @@ from vault_writer import ObsidianVaultWriter
 DEFAULT_VAULT_PATH = config.DEFAULT_VAULT_PATH
 HISTORICO_FILE = Path("historico_processados.json")
 
+
 def carregar_historico() -> dict:
     if HISTORICO_FILE.exists():
         try:
@@ -30,8 +31,10 @@ def carregar_historico() -> dict:
             return {}
     return {}
 
+
 def gravar_historico(historico: dict):
     HISTORICO_FILE.write_text(json.dumps(historico, indent=2, ensure_ascii=False), encoding="utf-8")
+
 
 def processar_um_video(url: str, extractor: YouTubeExtractor, analyzer: VideoAnalyzer, writer: ObsidianVaultWriter, forcar: bool = False, data_leitura: str = None) -> bool:
     if not data_leitura:
@@ -48,7 +51,7 @@ def processar_um_video(url: str, extractor: YouTubeExtractor, analyzer: VideoAna
     print(f"\n=======================================================")
     print(f"▶️ A processar: {url}")
     print(f"=======================================================")
-    
+
     try:
         print("1/3 📥 A recolher metadados e transcrição do YouTube...")
         dados_video = extractor.extrair_tudo(url)
@@ -92,6 +95,7 @@ def processar_um_video(url: str, extractor: YouTubeExtractor, analyzer: VideoAna
         print(f"❌ Erro ao processar o vídeo {url}: {str(e)}")
         return False
 
+
 def processar_ficheiro_lista(caminho_lista: str, extractor: YouTubeExtractor, analyzer: VideoAnalyzer, writer: ObsidianVaultWriter, forcar: bool = False):
     if not os.path.exists(caminho_lista):
         print(f"Erro: O ficheiro '{caminho_lista}' não foi encontrado.")
@@ -132,6 +136,49 @@ def processar_ficheiro_lista(caminho_lista: str, extractor: YouTubeExtractor, an
     print(f"🏁 Processamento Concluído: {sucessos}/{total} vídeos verificados/integrados no Obsidian!")
     print(f"=======================================================\n")
 
+
+def mostrar_revisao_canonicalizacao():
+    """Opção 5: mostra o conteúdo de revisao.md (pares ambíguos para confirmação manual)."""
+    caminho = Path("revisao.md")
+    if not caminho.exists():
+        print("\n✓ Não há pares para revisão (revisao.md não existe ou está vazio).")
+        return
+    conteudo = caminho.read_text(encoding="utf-8").strip()
+    if not conteudo:
+        print("\n✓ revisao.md está vazio — nada para rever.")
+        return
+    print(f"\n📋 {caminho.resolve()}\n")
+    print(conteudo)
+
+
+def mostrar_config_canonicalizacao():
+    """Opção 6: mostra os paths e thresholds usados pela canonicalização."""
+    # Usa config se as variáveis existirem; senão recorre aos defaults do Canonicalizer.
+    aliases = getattr(config, "ALIASES_PATH", "aliases.yaml")
+    decisoes = getattr(config, "DECISOES_PATH", "decisoes.jsonl")
+    revisao = getattr(config, "REVISAO_PATH", "revisao.md")
+    thr_auto = getattr(config, "CANON_THRESHOLD_FUSAO_AUTO", 95)
+    thr_rev = getattr(config, "CANON_THRESHOLD_REVISAO", 85)
+    blocking = getattr(config, "CANON_BLOCKING_POR_ULTIMO_TOKEN", True)
+    aprender = getattr(config, "CANON_APRENDER_ALIASES", True)
+
+    print("\n📁 Canonicalização — configuração em uso:")
+    print(f"   aliases:            {Path(aliases).resolve()}")
+    print(f"   decisões (auditoria): {Path(decisoes).resolve()}")
+    print(f"   revisão:            {Path(revisao).resolve()}")
+    print(f"   threshold fusão:    {thr_auto}   (>= funde automaticamente)")
+    print(f"   threshold revisão:  {thr_rev}   (entre este e o de fusão vai para revisao.md)")
+    print(f"   blocking:           {'último token' if blocking else 'todos os canónicos'}")
+    print(f"   aprender aliases:   {'sim' if aprender else 'não'}")
+
+    # Indica também se os ficheiros já existem (útil para saber se já correu).
+    print("\n📄 Estado dos ficheiros:")
+    for rotulo, caminho in (("aliases", aliases), ("decisões", decisoes), ("revisão", revisao)):
+        p = Path(caminho)
+        estado = f"existe ({p.stat().st_size} bytes)" if p.exists() else "não existe"
+        print(f"   {rotulo}: {estado}")
+
+
 def menu_interativo(vault_path: str):
     extractor = YouTubeExtractor()
     analyzer = VideoAnalyzer()
@@ -146,6 +193,8 @@ def menu_interativo(vault_path: str):
         print("2. Processar lista de vídeos (lista_de_videos.txt)")
         print("3. Processar outro ficheiro de links")
         print("4. Mudar pasta do Vault do Obsidian")
+        print("5. Ver fila de revisão de canonicalização (revisao.md)")
+        print("6. Ver configuração da canonicalização")
         print("0. Sair")
         print("="*50)
 
@@ -167,11 +216,16 @@ def menu_interativo(vault_path: str):
                 vault_path = novo_vault
                 writer = ObsidianVaultWriter(vault_path)
                 print(f"✓ Caminho do Vault atualizado para: {os.path.abspath(vault_path)}")
+        elif opcao == "5":
+            mostrar_revisao_canonicalizacao()
+        elif opcao == "6":
+            mostrar_config_canonicalizacao()
         elif opcao == "0":
             print("\nAté breve!")
             break
         else:
             print("Opção inválida.")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Extrai conhecimento de vídeos do YouTube diretamente para o Obsidian.")
@@ -191,6 +245,7 @@ def main():
         processar_ficheiro_lista(args.lista, extractor, analyzer, writer, forcar=args.forcar)
     else:
         menu_interativo(args.vault)
+
 
 if __name__ == "__main__":
     main()

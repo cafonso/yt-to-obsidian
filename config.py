@@ -25,3 +25,28 @@ MODELO_GEMINI = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 LIMIAR_VIDEO_LONGO_SEGUNDOS = int(os.environ.get("LIMIAR_VIDEO_LONGO", 45 * 60))  # 45 minutos
 DURACAO_CHUNK_SEGUNDOS = int(os.environ.get("DURACAO_CHUNK", 30 * 60))             # 30 minutos por fatia
 
+# ---------------------------------------------------------------------------
+# Canonicalização de entidades
+# ---------------------------------------------------------------------------
+
+# Caminhos dos ficheiros de suporte à canonicalização.
+# Relativos ao cwd por defeito; podes apontar para dentro do vault se preferires
+# (ex.: OBSIDIAN_VAULT_PATH/.canonicalizacao/aliases.yaml).
+ALIASES_PATH = os.environ.get("ALIASES_PATH", "aliases.yaml")
+DECISOES_PATH = os.environ.get("DECISOES_PATH", "decisoes.jsonl")
+REVISAO_PATH = os.environ.get("REVISAO_PATH", "revisao.md")
+
+# Thresholds de fusão fuzzy (0–100). Valores mais altos = menos fusões automáticas.
+CANON_THRESHOLD_FUSAO_AUTO = int(os.environ.get("CANON_THRESHOLD_FUSAO_AUTO", 95))
+CANON_THRESHOLD_REVISAO = int(os.environ.get("CANON_THRESHOLD_REVISAO", 85))
+
+# Se True, o fuzzy só compara nomes que partilham o último token (blocking).
+# Se False, compara contra todos os canónicos do tipo (mais lento, mais abrangente).
+CANON_BLOCKING_POR_ULTIMO_TOKEN = os.environ.get("CANON_BLOCKING_POR_ULTIMO_TOKEN", "1") == "1"
+
+# Se True, cada fusão confirmada é gravada em aliases.yaml para uso futuro.
+CANON_APRENDER_ALIASES = os.environ.get("CANON_APRENDER_ALIASES", "1") == "1"
+
+# Se True, escreve revisao.md (pares ambíguos) e decisoes.jsonl (auditoria).
+CANON_ESCREVER_REVISAO = os.environ.get("CANON_ESCREVER_REVISAO", "1") == "1"
+CANON_ESCREVER_DECISOES = os.environ.get("CANON_ESCREVER_DECISOES", "1") == "1"

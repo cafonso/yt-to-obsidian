@@ -40,3 +40,9 @@ Thumbs.db
 .vscode/
 .idea/
 .agents/
+
+# Canonicalização — estado efémero e logs
+decisoes.jsonl
+revisao.md
+
+# (aliases.yaml NÃO entra aqui — é para versionar)
