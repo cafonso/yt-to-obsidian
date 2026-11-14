@@ -1,37 +1,363 @@
 import os
 import time
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 from google import genai
 from google.genai import types
-from models import AnaliseVideo
+from models import AnaliseVideo, SegmentoAnalise, SinteseGlobal, PessoaMencionada, ArtefactoIA, ObraCitada
+import config
+from extractor import formatar_tempo
+
+def eh_nome_valido_pessoa(nome: str) -> bool:
+    if not nome or not nome.strip():
+        return False
+    partes = nome.strip().split()
+    return len(partes) >= 2
+
+def desduplicar_pessoas(pessoas: List[PessoaMencionada]) -> List[PessoaMencionada]:
+    vistas = {}
+    for p in pessoas:
+        nome_limpo = p.nome.strip()
+        if not eh_nome_valido_pessoa(nome_limpo):
+            continue
+        chave = nome_limpo.lower()
+        if chave not in vistas:
+            vistas[chave] = p
+        else:
+            if len(p.papel_ou_bio) > len(vistas[chave].papel_ou_bio):
+                vistas[chave] = p
+    return list(vistas.values())
+
+def desduplicar_artefactos(artefactos: List[ArtefactoIA]) -> List[ArtefactoIA]:
+    vistos = {}
+    for a in artefactos:
+        nome_limpo = a.nome.strip()
+        if not nome_limpo:
+            continue
+        chave = nome_limpo.lower()
+        if chave not in vistos:
+            vistos[chave] = a
+        else:
+            atual = vistos[chave]
+            if atual.subtipo == "modelo" and a.subtipo != "modelo":
+                atual.subtipo = a.subtipo
+            if not atual.fabricante_ou_autor and a.fabricante_ou_autor:
+                atual.fabricante_ou_autor = a.fabricante_ou_autor
+            if not atual.descricao and a.descricao:
+                atual.descricao = a.descricao
+            elif a.descricao and len(a.descricao) > len(atual.descricao or ""):
+                atual.descricao = a.descricao
+    return list(vistos.values())
+
+def desduplicar_obras(obras: List[ObraCitada]) -> List[ObraCitada]:
+    vistas = {}
+    for o in obras:
+        if not o.titulo or not o.titulo.strip():
+            continue
+        chave = o.titulo.strip().lower()
+        if chave not in vistas:
+            vistas[chave] = o
+        else:
+            atual = vistas[chave]
+            if not atual.autores and o.autores:
+                atual.autores = o.autores
+            if not atual.contexto and o.contexto:
+                atual.contexto = o.contexto
+    return list(vistas.values())
+
+def desduplicar_strings(lista: List[str]) -> List[str]:
+    vistos = set()
+    resultado = []
+    for item in lista:
+        if not item or not item.strip():
+            continue
+        item_limpo = item.strip()
+        chave = item_limpo.lower()
+        if chave not in vistos:
+            vistos.add(chave)
+            resultado.append(item_limpo)
+    return resultado
+
 
 class VideoAnalyzer:
-    def __init__(self, model_name: str = "gemini-2.5-flash"):
-        self.model_name = model_name
+    def __init__(self, model_name: str = None):
+        self.model_name = model_name or config.MODELO_GEMINI
         self.fallback_model = "gemini-3.5-flash-lite"
         # Usamos v1beta para suporte completo a JSON schema com Pydantic
         self.client = genai.Client(http_options={'api_version': 'v1beta'})
 
-    def _chamar_gemini_com_retry(self, modelo: str, conteudos: list, config: types.GenerateContentConfig, max_tentativas: int = 3):
+    def _chamar_gemini_com_retry(self, modelo: str, conteudos: list, config_obj: types.GenerateContentConfig, max_tentativas: int = 3):
         for tentativa in range(1, max_tentativas + 1):
             try:
                 return self.client.models.generate_content(
                     model=modelo,
                     contents=conteudos,
-                    config=config
+                    config=config_obj
                 )
             except Exception as e:
                 erro_str = str(e)
                 if "503" in erro_str or "UNAVAILABLE" in erro_str or "429" in erro_str:
                     if tentativa < max_tentativas:
-                        espera = tentativa * 3
+                        espera = tentativa * 4
                         print(f"    ⚠️ Modelo sobrecarregado (503/429). A tentar novamente em {espera}s (tentativa {tentativa}/{max_tentativas})...")
                         time.sleep(espera)
                         continue
                 raise e
 
-    def analisar(self, dados_video: Dict[str, Any]) -> AnaliseVideo:
-        """Envia transcrição ou áudio + metadados ao Gemini para extração estruturada."""
+    def _fatiar_transcricao(self, blocos: List[Dict[str, Any]], capitulos_originais: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+        """Divide a transcrição em segmentos temporais (~30 minutos) respeitando capítulos se existirem."""
+        duracao_chunk = config.DURACAO_CHUNK_SEGUNDOS
+        if not blocos:
+            return []
+
+        # Se houver capítulos oficiais estruturados, agrupa-os em fatias equilibradas
+        if capitulos_originais and len(capitulos_originais) > 1:
+            segmentos = []
+            chunk_caps = []
+            duracao_acumulada = 0
+            
+            for cap in capitulos_originais:
+                st = cap.get("start_time", 0)
+                et = cap.get("end_time", st)
+                dur_cap = et - st
+                chunk_caps.append(cap)
+                duracao_acumulada += dur_cap
+
+                if duracao_acumulada >= duracao_chunk:
+                    inicio_s = chunk_caps[0]["start_time"]
+                    fim_s = chunk_caps[-1]["end_time"]
+                    blocos_fatia = [b for b in blocos if inicio_s <= b['start'] < fim_s]
+                    if blocos_fatia:
+                        texto = "\n".join([f"{formatar_tempo(b['start'])} {b['text']}" for b in blocos_fatia])
+                        titulos_caps = " / ".join([c.get("title", "") for c in chunk_caps if c.get("title")])
+                        segmentos.append({
+                            "ts_inicio": formatar_tempo(inicio_s),
+                            "ts_fim": formatar_tempo(fim_s),
+                            "titulo_sugerido": titulos_caps,
+                            "texto": texto
+                        })
+                    chunk_caps = []
+                    duracao_acumulada = 0
+
+            if chunk_caps:
+                inicio_s = chunk_caps[0]["start_time"]
+                fim_s = chunk_caps[-1].get("end_time") or blocos[-1]['start']
+                blocos_fatia = [b for b in blocos if inicio_s <= b['start']]
+                if blocos_fatia:
+                    texto = "\n".join([f"{formatar_tempo(b['start'])} {b['text']}" for b in blocos_fatia])
+                    titulos_caps = " / ".join([c.get("title", "") for c in chunk_caps if c.get("title")])
+                    segmentos.append({
+                        "ts_inicio": formatar_tempo(inicio_s),
+                        "ts_fim": formatar_tempo(fim_s),
+                        "titulo_sugerido": titulos_caps,
+                        "texto": texto
+                    })
+            if segmentos:
+                return segmentos
+
+        # Fatiamento temporal direto contínuo (~30 minutos por fatia)
+        segmentos = []
+        chunk_atual = []
+        tempo_inicio_chunk = blocos[0]['start']
+
+        for b in blocos:
+            chunk_atual.append(b)
+            tempo_decorrido = b['start'] - tempo_inicio_chunk
+
+            if tempo_decorrido >= duracao_chunk:
+                tempo_fim_chunk = b['start'] + b.get('duration', 0)
+                texto_formatado = "\n".join([f"{formatar_tempo(x['start'])} {x['text']}" for x in chunk_atual])
+                segmentos.append({
+                    "ts_inicio": formatar_tempo(tempo_inicio_chunk),
+                    "ts_fim": formatar_tempo(tempo_fim_chunk),
+                    "titulo_sugerido": None,
+                    "texto": texto_formatado
+                })
+                chunk_atual = []
+                tempo_inicio_chunk = tempo_fim_chunk
+
+        if chunk_atual:
+            tempo_fim_chunk = chunk_atual[-1]['start'] + chunk_atual[-1].get('duration', 0)
+            texto_formatado = "\n".join([f"{formatar_tempo(x['start'])} {x['text']}" for x in chunk_atual])
+            segmentos.append({
+                "ts_inicio": formatar_tempo(tempo_inicio_chunk),
+                "ts_fim": formatar_tempo(tempo_fim_chunk),
+                "titulo_sugerido": None,
+                "texto": texto_formatado
+            })
+
+        return segmentos
+
+    def _analisar_segmento(self, dados_video: Dict[str, Any], segmento: Dict[str, Any], idx: int, total: int) -> SegmentoAnalise:
+        """Executa a extração estruturada de um segmento específico de vídeo longo."""
+        ts_inicio = segmento["ts_inicio"]
+        ts_fim = segmento["ts_fim"]
+        texto_segmento = segmento["texto"]
+        dica_titulo = f"\n- Tema/Capítulo sugerido nos metadados: {segmento['titulo_sugerido']}" if segmento.get('titulo_sugerido') else ""
+
+        prompt = f"""
+És um assistente especializado em Gestão de Conhecimento Pessoal (PKM) e síntese técnica para o Obsidian.
+Estás a analisar o BLOCO {idx}/{total} de um evento ou conferência técnica longa do YouTube.
+
+CONTEXTO GLOBAL DO VÍDEO:
+- Título do Vídeo: {dados_video.get('titulo')}
+- Canal: {dados_video.get('canal')}
+- Intervalo deste Bloco: {ts_inicio} a {ts_fim}{dica_titulo}
+
+TRANSCRIÇÃO DESTE BLOCO ({ts_inicio} a {ts_fim}):
+{texto_segmento}
+
+INSTRUÇÕES DE EXTRAÇÃO PARA ESTE BLOCO:
+0. REGRA ESTRITA DE IDIOMAS E NOMES:
+   - TÍTULOS DE PALESTRAS/OBRAS: Mantém o título original oficial sem traduzir.
+   - NOMES DE PESSOAS: Apenas pessoas com NOME COMPLETO canónico (ex: 'Sarah Friar', 'Satya Nadella'). NUNCA apenas primeiro nome.
+   - NOMES DE ARTEFACTOS: Mantém o nome oficial original (ex: 'GPT-4o', 'Claude 3.5 Sonnet', 'Cursor', 'LoRA').
+   - TEMAS: Usa a terminologia técnica padrão original (ex: 'Agentic Context', 'Reinforcement Learning'). Se traduzido para pt, coloca entre parênteses.
+   - RESUMO: Redige em português claro, formal e correto (PT-PT).
+
+1. Título do Segmento: Título descritivo ou tema da palestra/sessão que decorre neste intervalo ({ts_inicio} - {ts_fim}).
+2. Oradores: Nomes completos dos apresentadores ou intervenientes principais deste segmento específico.
+3. Resumo do Bloco: 1 a 3 parágrafos densos e claros em português (PT-PT) sobre o conteúdo debatido nesta sessão.
+4. Takeaways do Bloco: 2 a 5 ensinamentos essenciais desta sessão.
+5. Métricas & Números: Todos os dados quantitativos, percentagens, custos ou benchmarks citados nesta sessão.
+6. Tensões, Riscos & Limitações: Dificuldades técnicas, mitos desmontados ou críticas levantadas neste bloco.
+7. Agenda & Previsões: Prazos, anúncios futuros ou datas mencionadas nesta sessão.
+8. Recursos & Links: Papers, repositórios GitHub ou ferramentas mencionadas.
+9. Pessoas: Pessoas relevantes citadas com NOME COMPLETO canónico.
+10. Obras: Livros, artigos ou papers citados com títulos originais e autores.
+11. Organizações: Empresas ou instituições chave referidas neste segmento.
+12. Artefactos: Modelos, ferramentas, frameworks, agentes, hardware, técnicas, plataformas ou datasets citados neste segmento (com os 8 subtipos e fabricante).
+
+Responde estritamente de acordo com o esquema JSON fornecido.
+"""
+        config_obj = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=SegmentoAnalise,
+            temperature=0.2,
+        )
+
+        try:
+            resp = self._chamar_gemini_com_retry(self.model_name, [prompt], config_obj)
+        except Exception:
+            if self.fallback_model and self.fallback_model != self.model_name:
+                resp = self._chamar_gemini_com_retry(self.fallback_model, [prompt], config_obj)
+            else:
+                raise
+
+        if not resp or not resp.parsed:
+            raise ValueError(f"Falha ao analisar o bloco {idx}/{total}.")
+        return resp.parsed
+
+    def _consolidar_segmentos(self, dados_video: Dict[str, Any], segmentos_analisados: List[SegmentoAnalise]) -> AnaliseVideo:
+        """Funde as entidades recolhidas em todos os blocos e gera o resumo executivo global (Reduce)."""
+        todas_pessoas = []
+        todas_obras = []
+        todas_orgs = []
+        todos_artefactos = []
+        todos_temas = []
+        todas_metricas = []
+        todas_tensoes = []
+        todas_agendas = []
+        todos_recursos = []
+        capitulos = []
+
+        resumo_blocos_texto_lista = []
+
+        for seg in segmentos_analisados:
+            todas_pessoas.extend(seg.pessoas)
+            todas_obras.extend(seg.obras)
+            todas_orgs.extend(seg.organizacoes)
+            todos_artefactos.extend(seg.artefactos)
+            todos_temas.extend(seg.temas)
+            todas_metricas.extend(seg.metricas_e_numeros)
+            todas_tensoes.extend(seg.tensoes_e_riscos)
+            todas_agendas.extend(seg.agenda_e_previsoes)
+            todos_recursos.extend(seg.recursos_e_links)
+
+            oradores_str = f" _(Oradores: {', '.join(seg.oradores_ou_apresentadores)})_" if seg.oradores_ou_apresentadores else ""
+            takeaways_str = "\n    * " + "\n    * ".join(seg.takeaways_bloco) if seg.takeaways_bloco else ""
+            bloco_cap = f"**{seg.timestamp_inicio} - {seg.timestamp_fim}: {seg.titulo_segmento}**{oradores_str}\n  - {seg.resumo_bloco}{takeaways_str}"
+            capitulos.append(bloco_cap)
+
+            resumo_blocos_texto_lista.append(
+                f"- Bloco [{seg.timestamp_inicio} - {seg.timestamp_fim}] {seg.titulo_segmento}{oradores_str}:\n  {seg.resumo_bloco}"
+            )
+
+        resumo_blocos_texto = "\n\n".join(resumo_blocos_texto_lista)
+
+        prompt_sintese = f"""
+És um assistente especializado em Gestão de Conhecimento Pessoal (PKM) e síntese técnica para o Obsidian.
+Analisaste detalhadamente os {len(segmentos_analisados)} blocos de um evento/vídeo técnico longo do YouTube.
+Agora, gera o Resumo Executivo Global coeso e os Principais Takeaways transversais de todo o evento.
+
+METADADOS DO VÍDEO:
+- Título do Vídeo: {dados_video.get('titulo')}
+- Canal: {dados_video.get('canal')}
+- Duração: {dados_video.get('duracao_segundos')} segundos
+
+SÍNTESE DE CADA BLOCO DO EVENTO:
+{resumo_blocos_texto}
+
+INSTRUÇÕES:
+1. Resumo Executivo: Redige uma síntese coesa, densa e clara de todo o evento em 2 a 4 parágrafos em português formal (PT-PT).
+2. Takeaways Principais: Lista com os 5 a 10 ensinamentos práticos e estratégicos mais valiosos de todo o evento em português.
+3. Título Sugerido: Mantém o título original oficial sem traduções e limpo de clickbait.
+
+Responde estritamente de acordo com o esquema JSON fornecido.
+"""
+        config_obj = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=SinteseGlobal,
+            temperature=0.2,
+        )
+
+        try:
+            resp_sintese = self._chamar_gemini_com_retry(self.model_name, [prompt_sintese], config_obj)
+        except Exception:
+            if self.fallback_model and self.fallback_model != self.model_name:
+                resp_sintese = self._chamar_gemini_com_retry(self.fallback_model, [prompt_sintese], config_obj)
+            else:
+                raise
+
+        sintese: SinteseGlobal = resp_sintese.parsed
+
+        return AnaliseVideo(
+            titulo_sugerido=sintese.titulo_sugerido or dados_video.get('titulo'),
+            resumo_executivo=sintese.resumo_executivo,
+            takeaways_principais=sintese.takeaways_principais,
+            metricas_e_numeros=desduplicar_strings(todas_metricas),
+            tensoes_e_riscos=desduplicar_strings(todas_tensoes),
+            agenda_e_previsoes=desduplicar_strings(todas_agendas),
+            recursos_e_links=desduplicar_strings(todos_recursos),
+            capitulos=capitulos,
+            temas=desduplicar_strings(todos_temas),
+            pessoas=desduplicar_pessoas(todas_pessoas),
+            obras=desduplicar_obras(todas_obras),
+            organizacoes=desduplicar_strings(todas_orgs),
+            artefactos=desduplicar_artefactos(todos_artefactos)
+        )
+
+    def analisar_video_longo(self, dados_video: Dict[str, Any]) -> AnaliseVideo:
+        """Processa um vídeo longo dividindo-o em blocos e consolidando as entidades no final (Map-Reduce)."""
+        blocos = dados_video.get("transcricao_blocos") or []
+        capitulos_originais = dados_video.get("capitulos_originais") or []
+        segmentos = self._fatiar_transcricao(blocos, capitulos_originais)
+
+        duracao_min = (dados_video.get('duracao_segundos') or 0) // 60
+        print(f"    🧩 Vídeo longo ({duracao_min} min). A ativar pipeline Map-Reduce em {len(segmentos)} blocos temporais...")
+
+        segmentos_analisados = []
+        for i, seg in enumerate(segmentos, 1):
+            print(f"       -> [{i:02d}/{len(segmentos):02d}] A analisar bloco: {seg['ts_inicio']} a {seg['ts_fim']}...")
+            analise_bloco = self._analisar_segmento(dados_video, seg, i, len(segmentos))
+            segmentos_analisados.append(analise_bloco)
+            # Pequeno compasso de espera para respeitar cotas de chamadas por minuto
+            time.sleep(1)
+
+        print("    🔄 A consolidar entidades e a sintetizar o resumo executivo global...")
+        return self._consolidar_segmentos(dados_video, segmentos_analisados)
+
+    def analisar_passo_unico(self, dados_video: Dict[str, Any]) -> AnaliseVideo:
+        """Envia transcrição curta ou áudio + metadados ao Gemini numa única passagem."""
         caminho_audio = dados_video.get("caminho_audio")
         transcricao = dados_video.get("transcricao")
 
@@ -55,10 +381,10 @@ DESCRIÇÃO ORIGINAL DO VÍDEO (RECURSOS, LINKS E TIMESTAMPS):
         prompt += """
 INSTRUÇÕES ESPECÍFICAS DE EXTRAÇÃO:
 0. REGRA ESTRITA DE IDIOMAS E TÍTULOS (MUITO IMPORTANTE):
-   - TÍTULOS DE VÍDEOS: Mantém SEMPRE o título na sua língua original (geralmente em inglês). NUNCA traduzas o título do vídeo para português! Apenas remove emojis excessivos ou CAPS LOCK de clickbait (ex: "NEW Claude Model LEAKED?!" -> "New Claude Model Leaked").
-   - TÍTULOS DE OBRAS (Livros, Artigos, Papers): Mantém SEMPRE o título original oficial na língua de publicação (ex: 'Thinking, Fast and Slow', 'Attention Is All You Need', 'The Stacks Project'). NUNCA traduzas títulos de livros ou papers!
+   - TÍTULOS DE VÍDEOS: Mantém SEMPRE o título na sua língua original (geralmente em inglês). NUNCA traduzas o título do vídeo para português! Apenas remove emojis excessivos ou CAPS LOCK de clickbait.
+   - TÍTULOS DE OBRAS (Livros, Artigos, Papers): Mantém SEMPRE o título original oficial na língua de publicação. NUNCA traduzas títulos de livros ou papers!
    - NOMES DE ARTEFACTOS: Mantém SEMPRE o nome oficial (ex: 'GPT-4o', 'Claude 3.5 Sonnet', 'H100 SXM5', 'LoRA'). NUNCA traduzas nem abras nomes de modelos/ferramentas.
-   - TEMAS: Usa a terminologia técnica padrão original (geralmente em inglês, ex: 'Artificial Intelligence', 'Agentic Context', 'Large Language Models', 'Reinforcement Learning'). Se quiseres incluir a tradução portuguesa, coloca-a OBRIGATORIAMENTE entre parênteses (ex: 'Agentic Context (Contexto Agêntico)'). NUNCA uses termos isolados em português do Brasil.
+   - TEMAS: Usa a terminologia técnica padrão original (geralmente em inglês). Se quiseres incluir a tradução portuguesa, coloca-a OBRIGATORIAMENTE entre parênteses. NUNCA uses termos isolados em português do Brasil.
    - SÍNTESE: O resumo executivo, takeaways e bios devem ser redigidos em português claro, formal e correto (PT-PT).
 
 1. Resumo Executivo: Sintetiza em português os tópicos e conclusões essenciais (2 a 3 parágrafos).
@@ -76,23 +402,14 @@ INSTRUÇÕES ESPECÍFICAS DE EXTRAÇÃO:
 10. Livros, Artigos e Papers Citados: Obras citadas no título original com o(s) respetivo(s) autor(es).
 11. Organizações: Empresas, universidades, laboratórios ou instituições chave referidas (ex: 'OpenAI', 'Google DeepMind', 'NVIDIA', 'Anthropic', 'MIT', 'Hugging Face'). Usa o nome oficial e completo da organização.
 12. Artefactos (Modelos, Frameworks, Ferramentas, Agentes, Técnicas, Hardware, Plataformas, Datasets):
-   - Extrai TODOS os artefactos técnicos mencionados com o nome oficial (ex: 'GPT-4o', 'Claude 3.5 Sonnet', 'LangChain', 'Cursor', 'Devin', 'LoRA', 'RAG', 'H100', 'TPU v5', 'Hugging Face', 'MMLU').
+   - Extrai TODOS os artefactos técnicos mencionados com o nome oficial.
    - Classifica cada um num dos 8 subtipos: 'modelo', 'framework', 'ferramenta', 'agente', 'tecnica', 'hardware', 'plataforma', 'dataset'.
-   - Indica o fabricante/autor quando conhecido (ex: 'OpenAI', 'Anthropic', 'NVIDIA', 'Meta', 'Google DeepMind'). Deixa null se desconhecido.
+   - Indica o fabricante/autor quando conhecido. Deixa null se desconhecido.
    - Para cada artefacto, escreve 1-2 frases em português sobre o seu papel/relevância NO CONTEXTO específico do vídeo.
-   - Distinção importante:
-     * 'ferramenta' = produto que o utilizador opera diretamente (ex: Cursor, Copilot, Perplexity, Obsidian).
-     * 'agente' = sistema autónomo que age por conta própria (ex: Devin, SWE-agent, AutoGPT, OpenHands).
-     * 'modelo' = modelo de IA de qualquer modalidade (LLM, imagem, áudio, vídeo).
-     * 'framework' = biblioteca/framework de desenvolvimento (ex: LangChain, PyTorch, JAX).
-     * 'tecnica' = método, algoritmo ou abordagem (ex: RAG, LoRA, RLHF, Chain-of-Thought, MoE).
-     * 'hardware' = silício e infraestrutura de compute (ex: H100, TPU v5, Apple M4, Groq LPU).
-     * 'plataforma' = serviço/ecossistema de deployment (ex: Hugging Face, Replicate, AWS Bedrock, Together AI).
-     * 'dataset' = conjunto de dados ou benchmark (ex: The Pile, LAION, MMLU, HumanEval).
 
 Responde estritamente de acordo com o esquema JSON fornecido.
 """
-        config = types.GenerateContentConfig(
+        config_obj = types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=AnaliseVideo,
             temperature=0.2,
@@ -109,21 +426,19 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         response = None
         try:
             try:
-                response = self._chamar_gemini_com_retry(self.model_name, conteudos, config)
+                response = self._chamar_gemini_com_retry(self.model_name, conteudos, config_obj)
             except Exception as e:
                 if self.fallback_model and self.fallback_model != self.model_name:
                     print(f"    🔄 Modelo {self.model_name} indisponível. A alternar para modelo de contingência {self.fallback_model}...")
-                    response = self._chamar_gemini_com_retry(self.fallback_model, conteudos, config)
+                    response = self._chamar_gemini_com_retry(self.fallback_model, conteudos, config_obj)
                 else:
                     raise e
         finally:
-            # Limpeza: remove o ficheiro da API da Google
             if arquivo_google:
                 try:
                     self.client.files.delete(name=arquivo_google.name)
                 except Exception:
                     pass
-            # Limpeza local: remove o ficheiro de áudio temporário do disco
             if caminho_audio and os.path.exists(caminho_audio):
                 try:
                     os.remove(caminho_audio)
@@ -134,3 +449,14 @@ Responde estritamente de acordo com o esquema JSON fornecido.
             raise ValueError("O Gemini não devolveu um resultado estruturado válido.")
 
         return response.parsed
+
+    def analisar(self, dados_video: Dict[str, Any]) -> AnaliseVideo:
+        """Decide inteligentemente entre passo único (curtos) ou Map-Reduce (longos)."""
+        duracao = dados_video.get("duracao_segundos") or 0
+        blocos = dados_video.get("transcricao_blocos")
+
+        # Se for um vídeo longo com transcrição rica, ativa o pipeline Map-Reduce
+        if duracao > config.LIMIAR_VIDEO_LONGO_SEGUNDOS and blocos and len(blocos) > 200:
+            return self.analisar_video_longo(dados_video)
+        else:
+            return self.analisar_passo_unico(dados_video)

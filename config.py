@@ -20,3 +20,8 @@ SUBTIPOS_ARTEFACTO = {
 
 # Modelo Gemini predefinido
 MODELO_GEMINI = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+
+# Parâmetros para processamento de vídeos longos (fatiamento Map-Reduce)
+LIMIAR_VIDEO_LONGO_SEGUNDOS = int(os.environ.get("LIMIAR_VIDEO_LONGO", 45 * 60))  # 45 minutos
+DURACAO_CHUNK_SEGUNDOS = int(os.environ.get("DURACAO_CHUNK", 30 * 60))             # 30 minutos por fatia
+

@@ -45,3 +45,25 @@ class AnaliseVideo(BaseModel):
     obras: List[ObraCitada] = Field(default_factory=list, description="Livros, artigos, papers e ensaios citados no vídeo com títulos originais e autores.")
     organizacoes: List[str] = Field(default_factory=list, description="Empresas, instituições, universidades ou entidades mencionadas.")
     artefactos: List[ArtefactoIA] = Field(default_factory=list, description="Modelos de IA, frameworks, ferramentas, agentes, técnicas, hardware especializado, plataformas e datasets mencionados no vídeo.")
+
+class SegmentoAnalise(BaseModel):
+    timestamp_inicio: str = Field(description="Timestamp inicial do segmento, ex: '[00:00:00]' ou '[01:30:00]'.")
+    timestamp_fim: str = Field(description="Timestamp final do segmento, ex: '[00:35:00]'.")
+    titulo_segmento: str = Field(description="Título claro ou tema da apresentação/palestra deste bloco no idioma original.")
+    oradores_ou_apresentadores: List[str] = Field(default_factory=list, description="Nome completo dos oradores ou intervenientes principais deste segmento.")
+    resumo_bloco: str = Field(description="Resumo claro e aprofundado dos pontos essenciais deste segmento em português (1 a 3 parágrafos).")
+    takeaways_bloco: List[str] = Field(default_factory=list, description="Lista com 2 a 5 ensinamentos ou ideias essenciais deste bloco em português.")
+    metricas_e_numeros: List[str] = Field(default_factory=list, description="Métricas, percentagens, números de compute, benchmarks ou dados quantitativos citados neste bloco.")
+    tensoes_e_riscos: List[str] = Field(default_factory=list, description="Tensões, riscos técnicos, limitações ou mitos desmontados neste bloco.")
+    agenda_e_previsoes: List[str] = Field(default_factory=list, description="Previsões, anúncios de lançamentos futuros ou datas neste bloco.")
+    recursos_e_links: List[str] = Field(default_factory=list, description="Links reais, papers no Arxiv, repositórios GitHub, blogs ou ferramentas citadas.")
+    temas: List[str] = Field(default_factory=list, description="Termos técnicos e conceitos centrais abordados neste segmento.")
+    pessoas: List[PessoaMencionada] = Field(default_factory=list, description="Pessoas relevantes citadas com nome completo canónico.")
+    obras: List[ObraCitada] = Field(default_factory=list, description="Obras citadas com títulos originais e autores.")
+    organizacoes: List[str] = Field(default_factory=list, description="Organizações ou empresas mencionadas neste bloco.")
+    artefactos: List[ArtefactoIA] = Field(default_factory=list, description="Modelos, frameworks, ferramentas, agentes, hardware, plataformas ou datasets citados.")
+
+class SinteseGlobal(BaseModel):
+    titulo_sugerido: str = Field(description="Título do vídeo na língua original (limpo de clickbait).")
+    resumo_executivo: str = Field(description="Resumo executivo global coeso dos pontos essenciais discutidos em todo o vídeo/evento em português (2 a 4 parágrafos).")
+    takeaways_principais: List[str] = Field(description="Lista com os 5 a 10 ensinamentos ou conclusões transversais mais valiosas de todo o evento em português.")

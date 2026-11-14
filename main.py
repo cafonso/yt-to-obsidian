@@ -64,7 +64,11 @@ def processar_um_video(url: str, extractor: YouTubeExtractor, analyzer: VideoAna
         print(f"    ✓ Título sugerido: {analise.titulo_sugerido}")
         print(f"    ✓ Pessoas identificadas: {len(analise.pessoas)}")
         print(f"    ✓ Obras/Livros citados: {len(analise.obras)}")
+        print(f"    ✓ Organizações: {len(analise.organizacoes)}")
+        print(f"    ✓ Artefactos: {len(analise.artefactos)}")
         print(f"    ✓ Temas: {len(analise.temas)}")
+        if analise.capitulos:
+            print(f"    ✓ Sessões/Capítulos: {len(analise.capitulos)}")
 
         print("3/3 📁 A gerar teia de notas no Obsidian Vault...")
         caminho_nota = writer.salvar_video(dados_video, analise, data_leitura)

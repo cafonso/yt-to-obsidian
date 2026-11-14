@@ -48,15 +48,18 @@ class YouTubeExtractor:
                 "titulo": info.get("title", "Sem título"),
                 "canal": info.get("uploader") or info.get("channel", "Desconhecido"),
                 "canal_id": info.get("channel_id") or info.get("uploader_id", ""),
-                "canal_url": info.get("uploader_url") or info.get("channel_url"),
+                "canal_url": info.get('uploader_url') or info.get('channel_url'),
                 "data": data_formatada,
                 "duracao_segundos": info.get("duration", 0),
                 "url": info.get("webpage_url", url),
-                "descricao": info.get("description", "")
+                "descricao": info.get("description", ""),
+                "capitulos_originais": info.get("chapters") or []
             }
 
-    def obter_transcricao(self, video_id: str) -> Optional[str]:
-        """Tenta obter a transcrição de texto. Devolve None se falhar ou estiver bloqueada."""
+    def obter_transcricao_blocos(self, video_id: str) -> Optional[List[Dict[str, Any]]]:
+        """Tenta obter os blocos brutos da transcrição (start, duration, text)."""
+        blocos = None
+        # Tentativa 1: get_transcript legado ou api.fetch direta
         try:
             if hasattr(YouTubeTranscriptApi, 'get_transcript'):
                 blocos = YouTubeTranscriptApi.get_transcript(video_id, languages=self.idiomas)
@@ -64,25 +67,56 @@ class YouTubeExtractor:
                 api = YouTubeTranscriptApi()
                 fetched = api.fetch(video_id, languages=self.idiomas)
                 blocos = fetched.to_raw_data()
-            
-            linhas = []
-            for b in blocos:
-                timestamp = formatar_tempo(b['start'])
-                texto = b['text'].replace('\n', ' ').strip()
-                if texto:
-                    linhas.append(f"{timestamp} {texto}")
-            return "\n".join(linhas)
-
         except Exception:
-            # Fallback secundário para legendas geradas automaticamente
+            pass
+
+        # Tentativa 2: listar transcrições disponíveis (incluindo auto-geradas)
+        if not blocos:
             try:
-                transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-                for transcript in transcript_list:
-                    blocos = transcript.fetch()
-                    linhas = [f"{formatar_tempo(b['start'])} {b['text'].replace(chr(10), ' ').strip()}" for b in blocos]
-                    return "\n".join(linhas)
+                if hasattr(YouTubeTranscriptApi, 'list_transcripts'):
+                    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                else:
+                    api = YouTubeTranscriptApi()
+                    transcript_list = api.list(video_id)
+
+                for idioma in self.idiomas:
+                    try:
+                        t = transcript_list.find_transcript([idioma])
+                        fetched = t.fetch()
+                        blocos = fetched.to_raw_data() if hasattr(fetched, 'to_raw_data') else fetched
+                        break
+                    except Exception:
+                        continue
+
+                if not blocos:
+                    for t in transcript_list:
+                        fetched = t.fetch()
+                        blocos = fetched.to_raw_data() if hasattr(fetched, 'to_raw_data') else fetched
+                        break
             except Exception:
-                return None
+                pass
+
+        if not blocos:
+            return None
+
+        blocos_limpos = []
+        for b in blocos:
+            texto = b.get('text', '').replace('\n', ' ').strip()
+            if texto:
+                blocos_limpos.append({
+                    'start': float(b.get('start', 0)),
+                    'duration': float(b.get('duration', 0)),
+                    'text': texto
+                })
+        return blocos_limpos if blocos_limpos else None
+
+    def obter_transcricao(self, video_id: str) -> Optional[str]:
+        """Tenta obter a transcrição de texto formatada com timestamps."""
+        blocos = self.obter_transcricao_blocos(video_id)
+        if not blocos:
+            return None
+        linhas = [f"{formatar_tempo(b['start'])} {b['text']}" for b in blocos]
+        return "\n".join(linhas)
 
     def descarregar_audio(self, url: str, video_id: str) -> str:
         """Descarrega apenas o stream de áudio comprimido em formato leve (m4a)."""
@@ -105,9 +139,10 @@ class YouTubeExtractor:
         video_id = extrair_id_youtube(url)
         if not video_id:
             raise ValueError(f"URL inválido do YouTube: {url}")
-        
+
         metadados = self.obter_metadados(url)
-        transcricao = self.obter_transcricao(video_id)
+        blocos = self.obter_transcricao_blocos(video_id)
+        transcricao = "\n".join([f"{formatar_tempo(b['start'])} {b['text']}" for b in blocos]) if blocos else None
         caminho_audio = None
 
         if not transcricao:
@@ -115,8 +150,16 @@ class YouTubeExtractor:
             print("    🎧 A descarregar áudio leve para análise direta pelo Gemini Flash...")
             caminho_audio = self.descarregar_audio(url, video_id)
 
+        # Se a duração for 0 nos metadados mas temos blocos, calcula a partir do último bloco
+        duracao = metadados.get("duracao_segundos") or 0
+        if duracao == 0 and blocos:
+            ultimo = blocos[-1]
+            duracao = int(ultimo['start'] + ultimo.get('duration', 0))
+            metadados["duracao_segundos"] = duracao
+
         return {
             **metadados,
             "transcricao": transcricao,
+            "transcricao_blocos": blocos,
             "caminho_audio": caminho_audio
         }
