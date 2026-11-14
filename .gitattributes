@@ -1,0 +1,13 @@
+# Ficheiros de texto: normalizar para LF no repositório
+* text=auto eol=lf
+
+# Ficheiros gerados pelo pipeline (Python escreve CRLF em Windows):
+# forçar LF no repositório para evitar ping-pong nos diffs
+aliases.yaml    text eol=lf
+decisoes.jsonl  text eol=lf
+revisao.md      text eol=lf
+
+# Ficheiros binários (não tocar)
+*.m4a   binary
+*.png   binary
+*.jpg   binary
