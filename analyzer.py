@@ -3,7 +3,7 @@ import time
 from typing import Dict, Any, List, Optional
 from google import genai
 from google.genai import types
-from models import AnaliseVideo, SegmentoAnalise, SinteseGlobal, PessoaMencionada, ArtefactoIA, ObraCitada
+from models import AnaliseVideo, SegmentoAnalise, SinteseGlobal, PessoaMencionada, ArtefactoIA, ObraCitada, AgendaScout, SessaoScout, PalestraAnalise
 import config
 from extractor import formatar_tempo
 from canonicalizer import Canonicalizer
@@ -494,6 +494,190 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         canon.gravar()
 
         return analise
+
+    def executar_scout(self, dados_video: Dict[str, Any]) -> AgendaScout:
+        """Executa 'The Scout' para mapear a agenda real de uma conferência ou vídeo longo."""
+        transcricao = dados_video.get("transcricao")
+        if not transcricao:
+            raise ValueError("Não há transcrição disponível para executar o Scout.")
+
+        prompt = f"""
+És um assistente especializado em conferências de tecnologia e estruturação de eventos técnicos.
+Estás a analisar a transcrição completa e os metadados de uma transmissão longa do YouTube ({dados_video.get('duracao_segundos')} segundos).
+
+VÍDEO:
+- Título Oficial: {dados_video.get('titulo')}
+- Canal: {dados_video.get('canal')}
+- Duração: {dados_video.get('duracao_segundos')} segundos
+- Descrição do Vídeo:
+{dados_video.get('descricao', '')[:2000]}
+
+TRANSCRIÇÃO COMPLETA:
+{transcricao}
+
+OBJETIVO DO SCOUT:
+1. Determina se este vídeo é uma conferência / evento com múltiplas palestras e oradores (eh_conferencia=True), ou se é um monólogo/conversa com uma única pessoa (eh_conferencia=False).
+2. Se for uma conferência, extrai o nome curto e padronizado da conferência (ex: 'AIE CODE 2026', 'AI Engineer Summit 2026') e o Dia se mencionado no título ou descrição (ex: dia=2, dia_rotulo='Dia 2', data_sessao='2026-11-12').
+3. Identifica todas as palestras/apresentações individuais que compõem este evento:
+   - Timestamp e segundo de início (para deep link do YouTube).
+   - Timestamp e segundo de fim.
+   - Nome completo canónico do orador (se for apresentação individual).
+   - Empresa ou organização do orador (ex: OpenAI, Anthropic, Warp, Cognition).
+   - Título descritivo ou tema da palestra na língua original.
+   - Classifica o tipo de sessão (palestra, keynote, painel, entrevista). Ignora intervalos vazios ou pausas de almoço.
+
+Responde estritamente de acordo com o esquema JSON fornecido.
+"""
+        config_obj = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=AgendaScout,
+            temperature=0.1,
+        )
+
+        try:
+            resp = self._chamar_gemini_com_retry(self.model_name, [prompt], config_obj)
+        except Exception:
+            if self.fallback_model and self.fallback_model != self.model_name:
+                resp = self._chamar_gemini_com_retry(self.fallback_model, [prompt], config_obj)
+            else:
+                raise
+
+        if not resp or not resp.parsed:
+            raise ValueError("Falha ao executar o Scout sobre o vídeo.")
+        return resp.parsed
+
+    def analisar_palestra(
+        self,
+        dados_video: Dict[str, Any],
+        agenda: AgendaScout,
+        sessao: SessaoScout,
+        texto_palestra: str,
+        canon: Canonicalizer
+    ) -> PalestraAnalise:
+        """Extrai detalhadamente os pontos e entidades de uma palestra individual da conferência."""
+        orador_info = f"{sessao.orador_principal}" if sessao.orador_principal else "Vários / Painel"
+        if sessao.organizacao:
+            orador_info += f" ({sessao.organizacao})"
+
+        prompt = f"""
+És um assistente especializado em Gestão de Conhecimento Pessoal (PKM) e síntese técnica para o Obsidian.
+Estás a analisar uma PALESTRA INDIVIDUAL ({sessao.ordem}/{len(agenda.sessoes)}) dentro da conferência '{agenda.nome_conferencia}' ({agenda.dia_rotulo or 'Dia 1'}).
+
+CONTEXTO DA PALESTRA:
+- Conferência: {agenda.nome_conferencia}
+- Orador: {orador_info}
+- Título da Palestra: {sessao.titulo_palestra}
+- Intervalo Temporal: {sessao.timestamp_inicio} a {sessao.timestamp_fim}
+
+TRANSCRIÇÃO DESTA PALESTRA:
+{texto_palestra}
+
+INSTRUÇÕES DE EXTRAÇÃO:
+0. REGRA ESTRITA DE IDIOMAS E NOMES:
+   - TÍTULOS: Mantém o título da palestra na língua original (inglês).
+   - NOMES DE PESSOAS: Apenas pessoas com NOME COMPLETO canónico (ex: 'Jason Liu', 'Zach Lloyd'). NUNCA apenas primeiro nome.
+   - NOMES DE ARTEFACTOS: Mantém o nome oficial original (ex: 'GPT-4o', 'Claude 3.5 Sonnet', 'ArtCraft', 'Warp', 'LoRA').
+   - RESUMO E TAKEAWAYS: Redige em português claro, formal e correto (PT-PT).
+
+1. Título da Palestra: Título oficial ou descritivo da apresentação na língua original.
+2. Resumo Executivo: 2 a 3 parágrafos densos e claros em português (PT-PT) sobre o conteúdo central debatido por este orador.
+3. Takeaways Principais: 3 a 6 ensinamentos essenciais desta palestra.
+4. Métricas & Números: Todos os dados quantitativos, percentagens, custos ou benchmarks citados nesta palestra.
+5. Tensões & Riscos: Dificuldades técnicas, limitações ou mitos desmontados nesta palestra.
+6. Agenda & Previsões: Prazos, anúncios futuros ou datas mencionadas nesta sessão.
+7. Recursos & Links: Papers, repositórios GitHub ou ferramentas mencionadas.
+8. Pessoas: Pessoas relevantes citadas com NOME COMPLETO canónico.
+9. Obras: Livros, artigos ou papers citados com títulos originais e autores.
+10. Organizações: Empresas ou instituições chave referidas nesta palestra.
+11. Artefactos: Modelos, ferramentas, frameworks, agentes, hardware ou técnicas citados nesta palestra (com os 8 subtipos e fabricante).
+
+Responde estritamente de acordo com o esquema JSON fornecido.
+"""
+        config_obj = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=PalestraAnalise,
+            temperature=0.2,
+        )
+
+        try:
+            resp = self._chamar_gemini_com_retry(self.model_name, [prompt], config_obj)
+        except Exception:
+            if self.fallback_model and self.fallback_model != self.model_name:
+                resp = self._chamar_gemini_com_retry(self.fallback_model, [prompt], config_obj)
+            else:
+                raise
+
+        if not resp or not resp.parsed:
+            raise ValueError(f"Falha ao analisar a palestra #{sessao.ordem}: {sessao.titulo_palestra}")
+
+        palestra: PalestraAnalise = resp.parsed
+
+        # Canonicalização de entidades em tempo real
+        palestra.pessoas = canon.canonicalizar_pessoas(palestra.pessoas)
+        palestra.artefactos = canon.canonicalizar_artefactos(palestra.artefactos)
+        palestra.obras = canon.canonicalizar_obras(palestra.obras)
+        palestra.organizacoes = canon.canonicalizar_strings("organizacao", palestra.organizacoes)
+        palestra.temas = canon.canonicalizar_strings("tema", palestra.temas)
+
+        return palestra
+
+    def processar_conferencia_completa(
+        self,
+        dados_video: Dict[str, Any],
+        agenda: AgendaScout,
+        writer,
+        data_leitura: str = None
+    ) -> str:
+        """Processa todas as palestras detetadas pelo Scout e gera as notas atómicas + MOC na subpasta dedicada."""
+        blocos = dados_video.get("transcricao_blocos") or []
+        dia_rotulo = agenda.dia_rotulo or f"Dia {agenda.dia or 1}"
+        total = len(agenda.sessoes)
+
+        print(f"\n🏛️ A processar Conferência: '{agenda.nome_conferencia}' ({dia_rotulo})")
+        print(f"📁 Pasta de destino: Videos/{agenda.nome_conferencia}/")
+        print(f"📋 Total de palestras a extrair: {total}\n")
+
+        canon = Canonicalizer()
+        palestras_processadas = []
+
+        for idx, sessao in enumerate(agenda.sessoes, 1):
+            orador_str = sessao.orador_principal or "Painel"
+            print(f"   -> [{idx:02d}/{total:02d}] {sessao.timestamp_inicio} {orador_str}: {sessao.titulo_palestra[:45]}...")
+
+            # Extrai os blocos correspondentes a esta palestra
+            blocos_fatia = [b for b in blocos if sessao.segundos_inicio <= b['start'] <= sessao.segundos_fim]
+            if not blocos_fatia:
+                # Fallback se a margem for apertada: procura o bloco mais próximo
+                blocos_fatia = [b for b in blocos if (sessao.segundos_inicio - 30) <= b['start'] <= (sessao.segundos_fim + 30)]
+
+            texto_fatia = "\n".join([f"{formatar_tempo(b['start'])} {b['text']}" for b in blocos_fatia])
+            if not texto_fatia.strip():
+                print(f"      ⚠️ Aviso: Transcrição vazia para a sessão #{sessao.ordem}. A avançar...")
+                continue
+
+            # Analisa a palestra individualmente
+            analise_palestra = self.analisar_palestra(dados_video, agenda, sessao, texto_fatia, canon)
+
+            # Grava a nota atómica na subpasta da conferência
+            caminho_nota = writer.salvar_palestra_conferencia(dados_video, agenda, sessao, analise_palestra, data_leitura)
+            palestras_processadas.append({
+                "sessao": sessao,
+                "caminho": caminho_nota,
+                "analise": analise_palestra
+            })
+
+            # Intervalo para respeitar cotas de chamadas da API
+            time.sleep(1)
+
+        # Grava os aliases aprendidos durante a conferência
+        canon.gravar()
+
+        # Cria ou atualiza o MOC central da conferência
+        print("\n   📑 A compilar/atualizar o Índice MOC da conferência...")
+        caminho_moc = writer.salvar_ou_atualizar_moc_conferencia(dados_video, agenda, palestras_processadas, data_leitura)
+        print(f"   ✓ MOC da Conferência: {caminho_moc}")
+
+        return str(caminho_moc)
 
     def analisar(self, dados_video: Dict[str, Any]) -> AnaliseVideo:
         """Decide inteligentemente entre passo único (curtos) ou Map-Reduce (longos)."""

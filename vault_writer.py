@@ -2,8 +2,8 @@ import os
 import re
 import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Set
-from models import AnaliseVideo, ObraCitada, PessoaMencionada, ArtefactoIA
+from typing import Dict, Any, List, Set, Optional
+from models import AnaliseVideo, ObraCitada, PessoaMencionada, ArtefactoIA, AgendaScout, SessaoScout, PalestraAnalise
 import config
 
 # ---------------------------------------------------------------------------
@@ -563,3 +563,292 @@ organizacoes: {organizacoes_links}
             self.salvar_ou_atualizar_artefacto(a, video_wikilink)
 
         return caminho_video
+
+    # ------------------------------------------------------------------
+    # Módulo de Conferências e Múltiplos Dias (Opção A: Subpasta Dedicada)
+    # ------------------------------------------------------------------
+
+    def obter_pasta_conferencia(self, nome_conferencia: str) -> Path:
+        """Cria e devolve a subpasta dedicada a uma conferência dentro de Videos/."""
+        pasta_conf = self.pasta_videos / limpar_nome_ficheiro(nome_conferencia)
+        pasta_conf.mkdir(parents=True, exist_ok=True)
+        return pasta_conf
+
+    def salvar_palestra_conferencia(
+        self,
+        dados_video: Dict[str, Any],
+        agenda: AgendaScout,
+        sessao: SessaoScout,
+        analise: PalestraAnalise,
+        data_leitura: str = None
+    ) -> Path:
+        """Cria uma nota atómica dedicada a uma palestra individual dentro da subpasta da conferência."""
+        if not data_leitura:
+            data_leitura = datetime.date.today().isoformat()
+
+        pasta_conf = self.obter_pasta_conferencia(agenda.nome_conferencia)
+        dia_num = agenda.dia or 1
+        dia_prefixo = f"D{dia_num:02d}"
+
+        orador_limpo = f" - {limpar_nome_ficheiro(sessao.orador_principal)}" if sessao.orador_principal else ""
+        titulo_limpo = limpar_nome_ficheiro(analise.titulo_palestra or sessao.titulo_palestra)
+        nome_ficheiro = f"{dia_prefixo} - {sessao.ordem:02d}{orador_limpo} - {titulo_limpo}.md"
+        # Limita tamanho se for muito longo
+        if len(nome_ficheiro) > 130:
+            nome_ficheiro = f"{dia_prefixo} - {sessao.ordem:02d}{orador_limpo} - {titulo_limpo[:80]}.md"
+
+        caminho_palestra = pasta_conf / nome_ficheiro
+        palestra_wikilink = f"[[{caminho_palestra.stem}]]"
+        moc_conferencia_wikilink = f"[[{limpar_nome_ficheiro(agenda.nome_conferencia)}]]"
+
+        # Deep link para o segundo exato
+        video_id = dados_video.get("id")
+        deep_link = f"https://youtu.be/{video_id}?t={sessao.segundos_inicio}" if video_id else dados_video.get("url")
+
+        # Pessoas e organizações
+        pessoas_validas = [p for p in analise.pessoas if eh_nome_valido_pessoa(p.nome)]
+        organizacoes_extra = {p.nome.strip() for p in analise.pessoas if eh_organizacao(p.nome)}
+        organizacoes_todas = list({*[o.strip() for o in analise.organizacoes if o and o.strip()], *organizacoes_extra})
+
+        pessoas_links = [f"[[{limpar_nome_ficheiro(p.nome)}]]" for p in pessoas_validas]
+        obras_links = [f"[[{limpar_nome_ficheiro(o.titulo)}]]" for o in analise.obras]
+        temas_links = [f"[[{limpar_nome_ficheiro(t)}]]" for t in analise.temas]
+        artefactos_links = [f"[[{limpar_nome_ficheiro(a.nome)}]]" for a in analise.artefactos]
+        organizacoes_links = [f"[[{limpar_nome_ficheiro(o)}]]" for o in organizacoes_todas]
+
+        orador_fmt = f"[[{limpar_nome_ficheiro(sessao.orador_principal)}]]" if sessao.orador_principal else "Vários / Painel"
+        org_fmt = f"([[{limpar_nome_ficheiro(sessao.organizacao)}]])" if sessao.organizacao else ""
+        tag_conf = limpar_nome_ficheiro(agenda.nome_conferencia).lower().replace(" ", "-")
+
+        nota = f"""---
+tipo: video_palestra
+conferencia: "{moc_conferencia_wikilink}"
+dia: {dia_num}
+ordem: {sessao.ordem}
+orador: "{sessao.orador_principal or 'Vários'}"
+organizacao: "{sessao.organizacao or ''}"
+timestamp_inicio: "{sessao.timestamp_inicio}"
+timestamp_fim: "{sessao.timestamp_fim}"
+url_palestra: "{deep_link}"
+data_publicacao: "{dados_video.get('data')}"
+data_leitura: "{data_leitura}"
+tags:
+  - video/palestra
+  - conferencia/{tag_conf}
+temas: {temas_links}
+pessoas: {pessoas_links}
+obras: {obras_links}
+artefactos: {artefactos_links}
+organizacoes: {organizacoes_links}
+---
+# {analise.titulo_palestra or sessao.titulo_palestra}
+
+> 🏛️ **Conferência:** {moc_conferencia_wikilink} (Dia {dia_num})  
+> 👤 **Orador:** {orador_fmt} {org_fmt}  
+> ⏱️ **Momento:** `{sessao.timestamp_inicio} -> {sessao.timestamp_fim}`  
+> 🔗 **Ver Palestra no YouTube:** [{deep_link}]({deep_link})
+
+---
+
+## 📝 Resumo da Palestra
+{analise.resumo_executivo}
+
+---
+
+## 💡 Principais Takeaways
+"""
+        for tk in analise.takeaways_principais:
+            nota += f"- {tk}\n"
+
+        if analise.metricas_e_numeros:
+            nota += "\n---\n\n## 📊 Métricas & Números Chave\n"
+            for m in analise.metricas_e_numeros:
+                nota += f"- {m}\n"
+
+        if analise.tensoes_e_riscos:
+            nota += "\n---\n\n## ⚠️ Tensões & Limitações\n"
+            for t in analise.tensoes_e_riscos:
+                nota += f"- {t}\n"
+
+        if analise.agenda_e_previsoes:
+            nota += "\n---\n\n## 📅 Previsões & Futuro\n"
+            for a in analise.agenda_e_previsoes:
+                nota += f"- {a}\n"
+
+        if pessoas_validas:
+            nota += "\n---\n\n## 👤 Pessoas Mencionadas\n"
+            for p in pessoas_validas:
+                nota += f"- **[[{limpar_nome_ficheiro(p.nome)}]]**: {p.papel_ou_bio}\n"
+
+        if analise.artefactos:
+            nota += "\n---\n\n## 🧩 Artefactos & Ferramentas\n"
+            for a in analise.artefactos:
+                fab = f" — _{a.fabricante_ou_autor}_" if a.fabricante_ou_autor else ""
+                desc = f": {a.descricao}" if a.descricao else ""
+                nota += f"- **[[{limpar_nome_ficheiro(a.nome)}]]** (`{a.subtipo}`){fab}{desc}\n"
+
+        if organizacoes_todas:
+            nota += "\n---\n\n## 🏢 Organizações Citadas\n"
+            for o in organizacoes_todas:
+                nota += f"- [[{limpar_nome_ficheiro(o)}]]\n"
+
+        if analise.recursos_e_links:
+            nota += "\n---\n\n## 🔗 Recursos & Links\n"
+            for r in analise.recursos_e_links:
+                nota += f"- {r}\n"
+
+        if analise.temas:
+            nota += "\n---\n\n## 🏷️ Temas\n"
+            for tm in analise.temas:
+                nota += f"- [[{limpar_nome_ficheiro(tm)}]]\n"
+
+        # Grava a nota atómica da palestra
+        caminho_palestra.write_text(nota, encoding="utf-8")
+
+        # Propaga entidades para as notas dedicadas (Pessoas, Artefactos, etc.)
+        for p in pessoas_validas:
+            obras_p = [o.titulo for o in analise.obras if p.nome in o.autores]
+            self.salvar_ou_atualizar_pessoa(p, palestra_wikilink, obras_p)
+
+        for o in analise.obras:
+            self.salvar_ou_atualizar_obra(o, palestra_wikilink)
+
+        for tm in analise.temas:
+            self.salvar_ou_atualizar_tema(tm, palestra_wikilink)
+
+        for org in organizacoes_todas:
+            artefactos_org = [
+                a.nome for a in analise.artefactos
+                if a.fabricante_ou_autor and a.fabricante_ou_autor.strip().lower() == org.lower()
+            ]
+            self.salvar_ou_atualizar_organizacao(org, palestra_wikilink, artefactos_org)
+
+        for a in analise.artefactos:
+            self.salvar_ou_atualizar_artefacto(a, palestra_wikilink)
+
+        return caminho_palestra
+
+    def salvar_ou_atualizar_moc_conferencia(
+        self,
+        dados_video: Dict[str, Any],
+        agenda: AgendaScout,
+        palestras_processadas: List[Dict[str, Any]],
+        data_leitura: str = None
+    ) -> Path:
+        """Cria ou atualiza a Nota-Mãe MOC da conferência, acumulando os dias sem apagar dias anteriores."""
+        if not data_leitura:
+            data_leitura = datetime.date.today().isoformat()
+
+        pasta_conf = self.obter_pasta_conferencia(agenda.nome_conferencia)
+        nome_ficheiro_moc = f"{limpar_nome_ficheiro(agenda.nome_conferencia)}.md"
+        caminho_moc = pasta_conf / nome_ficheiro_moc
+
+        dia_num = agenda.dia or 1
+        dia_rotulo = agenda.dia_rotulo or f"Dia {dia_num}"
+        data_sessao = agenda.data_sessao or dados_video.get("data", "")
+        seccao_cabecalho_dia = f"## 📅 {dia_rotulo} ({data_sessao})"
+
+        # Constrói tabela markdown das palestras deste dia
+        tabela_dia = f"""{seccao_cabecalho_dia}
+
+> 🔗 **Transmissão Completa deste Dia:** [{dados_video.get('titulo')}]({dados_video.get('url')})  
+> ⏱️ **Duração Total:** {int(dados_video.get('duracao_segundos', 0) // 60)} min | **Total de Palestras:** {len(palestras_processadas)}
+
+| # | Início | Orador | Empresa | Palestra |
+|---|---|---|---|---|
+"""
+        for p in palestras_processadas:
+            s: SessaoScout = p["sessao"]
+            link_palestra = f"[[{p['caminho'].stem}]]"
+            orador_str = f"[[{limpar_nome_ficheiro(s.orador_principal)}]]" if s.orador_principal else "Painel"
+            org_str = f"[[{limpar_nome_ficheiro(s.organizacao)}]]" if s.organizacao else "-"
+            tabela_dia += f"| {s.ordem:02d} | `{s.timestamp_inicio}` | {orador_str} | {org_str} | {link_palestra} |\n"
+
+        if not caminho_moc.exists():
+            tag_conf = limpar_nome_ficheiro(agenda.nome_conferencia).lower().replace(" ", "-")
+            conteudo_moc = f"""---
+tipo: conferencia_moc
+conferencia: "{agenda.nome_conferencia}"
+canal: "{dados_video.get('canal')}"
+data_primeira_leitura: "{data_leitura}"
+tags:
+  - conferencia/moc
+  - conferencia/{tag_conf}
+---
+# 🏛️ {agenda.nome_conferencia}
+
+> 📺 **Canal Organizador:** [{dados_video.get('canal')}]({dados_video.get('canal_url', '')})  
+> 📂 **Pasta de Palestras:** `{pasta_conf.name}/`
+
+Este ficheiro é o **Mapa de Conteúdo (MOC)** que centraliza todos os dias e palestras da conferência.
+
+---
+
+{tabela_dia}
+"""
+            caminho_moc.write_text(conteudo_moc, encoding="utf-8")
+        else:
+            conteudo_existente = caminho_moc.read_text(encoding="utf-8")
+            # Se a secção deste dia já existia, substitui-a; caso contrário, acrescenta no fim
+            padrao_dia = re.compile(rf"{re.escape(seccao_cabecalho_dia)}[\s\S]*?(?=\n## 📅|\Z)")
+            if padrao_dia.search(conteudo_existente):
+                novo_conteudo = padrao_dia.sub(tabela_dia.strip(), conteudo_existente)
+            else:
+                novo_conteudo = conteudo_existente.rstrip() + f"\n\n---\n\n{tabela_dia}\n"
+            caminho_moc.write_text(novo_conteudo, encoding="utf-8")
+
+        # Atualiza o Diário com o registo da conferência
+        self.atualizar_diario_conferencia(dados_video, agenda, f"[[{caminho_moc.stem}]]", len(palestras_processadas), data_leitura)
+
+        return caminho_moc
+
+    def atualizar_diario_conferencia(
+        self,
+        dados_video: Dict[str, Any],
+        agenda: AgendaScout,
+        moc_wikilink: str,
+        total_palestras: int,
+        data_leitura: str = None
+    ):
+        """Regista a conferência no Diário (YYYY-MM-DD.md) com link para o MOC e lista das palestras do dia."""
+        if not data_leitura:
+            data_leitura = datetime.date.today().isoformat()
+
+        caminho_diario = self.vault_path / f"{data_leitura}.md"
+        canal_id = dados_video.get("canal_id")
+        canal_str = f"{dados_video.get('canal')} (ID: {canal_id})" if canal_id else dados_video.get('canal')
+        dia_rotulo = agenda.dia_rotulo or f"Dia {agenda.dia or 1}"
+
+        bloco_novo = f"""===========================
+# {moc_wikilink} — {dia_rotulo}
+=== METADADOS DA CONFERÊNCIA ===
+Conferência: {moc_wikilink} ({dia_rotulo})
+Canal: {canal_str}
+Data da Sessão: {agenda.data_sessao or dados_video.get('data')}
+Data de Leitura: {data_leitura}
+Palestras Integradas: {total_palestras} notas atómicas na subpasta [[{moc_wikilink}]]
+Link da Transmissão: {dados_video.get('url')}
+
+--- Descrição ---
+{dados_video.get('descricao', '').strip()[:800]}...
+"""
+        if caminho_diario.exists():
+            conteudo = caminho_diario.read_text(encoding="utf-8")
+            if f"# {moc_wikilink} — {dia_rotulo}" in conteudo:
+                return
+
+            if "# Resenha do dia" in conteudo or "# Resenha do Dia" in conteudo:
+                padrao = r"(#\s+Resenha do [Dd]ia)"
+                substituicao = f"{bloco_novo}\n\\1"
+                novo_conteudo, count = re.subn(padrao, substituicao, conteudo, count=1)
+                if count > 0:
+                    caminho_diario.write_text(novo_conteudo, encoding="utf-8")
+                    print(f"    ✓ Diário {data_leitura}.md atualizado com a conferência {moc_wikilink} ({dia_rotulo}).")
+                    return
+
+            novo_conteudo = conteudo.rstrip() + f"\n\n{bloco_novo}\n"
+            caminho_diario.write_text(novo_conteudo, encoding="utf-8")
+            print(f"    ✓ Diário {data_leitura}.md atualizado com a conferência {moc_wikilink} ({dia_rotulo}).")
+        else:
+            caminho_diario.write_text(bloco_novo + "\n", encoding="utf-8")
+            print(f"    ✓ Diário {data_leitura}.md criado com a conferência {moc_wikilink} ({dia_rotulo}).")

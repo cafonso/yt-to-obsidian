@@ -67,3 +67,37 @@ class SinteseGlobal(BaseModel):
     titulo_sugerido: str = Field(description="Título do vídeo na língua original (limpo de clickbait).")
     resumo_executivo: str = Field(description="Resumo executivo global coeso dos pontos essenciais discutidos em todo o vídeo/evento em português (2 a 4 parágrafos).")
     takeaways_principais: List[str] = Field(description="Lista com os 5 a 10 ensinamentos ou conclusões transversais mais valiosas de todo o evento em português.")
+
+class SessaoScout(BaseModel):
+    ordem: int = Field(description="Número de ordem sequencial da palestra (1, 2, ...)")
+    timestamp_inicio: str = Field(description="Timestamp aproximado de início no formato [HH:MM:SS] ou [MM:SS]")
+    segundos_inicio: int = Field(description="Segundo inteiro de início no vídeo para deep link direto")
+    timestamp_fim: str = Field(description="Timestamp de fim no formato [HH:MM:SS] ou [MM:SS]")
+    segundos_fim: int = Field(description="Segundo inteiro de fim no vídeo")
+    orador_principal: Optional[str] = Field(None, description="Nome completo canónico do orador principal (ex: 'Jason Liu'). None se painel ou introdução.")
+    organizacao: Optional[str] = Field(None, description="Empresa ou entidade do orador (ex: 'OpenAI', 'Anthropic', 'Warp').")
+    titulo_palestra: str = Field(description="Título ou tema específico da palestra na língua original.")
+    tipo_sessao: str = Field(default="palestra", description="'palestra', 'keynote', 'painel', 'entrevista' ou 'intervalo'")
+
+class AgendaScout(BaseModel):
+    nome_conferencia: str = Field(description="Nome ou acrónimo da conferência (ex: 'AIE CODE 2026', 'AI Engineer Summit 2026')")
+    dia: Optional[int] = Field(default=1, description="Número do dia da conferência se aplicável (ex: 1, 2, 3)")
+    dia_rotulo: Optional[str] = Field(default=None, description="Rótulo legível do dia (ex: 'Dia 2', 'Day 2')")
+    data_sessao: Optional[str] = Field(default=None, description="Data da sessão se indicada (ex: '2026-11-12')")
+    eh_conferencia: bool = Field(description="True se o vídeo contiver múltiplas apresentações/oradores; False se for um único orador/monólogo contínuo.")
+    sessoes: List[SessaoScout] = Field(description="Lista ordenada de todas as palestras/sessões detetadas.")
+
+class PalestraAnalise(BaseModel):
+    titulo_palestra: str = Field(description="Título oficial da palestra na língua original.")
+    resumo_executivo: str = Field(description="Resumo claro, denso e aprofundado dos tópicos debatidos nesta palestra em português (2 a 3 parágrafos em PT-PT).")
+    takeaways_principais: List[str] = Field(description="Lista com os 3 a 6 ensinamentos mais valiosos desta palestra em português.")
+    metricas_e_numeros: List[str] = Field(default_factory=list, description="Números e métricas quantitativas citadas especificamente nesta palestra.")
+    tensoes_e_riscos: List[str] = Field(default_factory=list, description="Tensões, riscos, limitações apontadas ou mitos desmontados nesta palestra.")
+    agenda_e_previsoes: List[str] = Field(default_factory=list, description="Anúncios futuros, prazos ou expectativas citadas nesta palestra.")
+    recursos_e_links: List[str] = Field(default_factory=list, description="Links reais, repositórios GitHub, papers ou ferramentas citadas nesta palestra.")
+    temas: List[str] = Field(default_factory=list, description="Conceitos técnicos centrais desta palestra.")
+    pessoas: List[PessoaMencionada] = Field(default_factory=list, description="Pessoas relevantes citadas com nome completo canónico.")
+    obras: List[ObraCitada] = Field(default_factory=list, description="Livros, artigos ou papers citados com títulos originais e autores.")
+    organizacoes: List[str] = Field(default_factory=list, description="Organizações ou empresas mencionadas nesta palestra.")
+    artefactos: List[ArtefactoIA] = Field(default_factory=list, description="Modelos, frameworks, ferramentas, hardware ou plataformas citados nesta palestra.")
+

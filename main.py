@@ -36,7 +36,15 @@ def gravar_historico(historico: dict):
     HISTORICO_FILE.write_text(json.dumps(historico, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def processar_um_video(url: str, extractor: YouTubeExtractor, analyzer: VideoAnalyzer, writer: ObsidianVaultWriter, forcar: bool = False, data_leitura: str = None) -> bool:
+def processar_um_video(
+    url: str,
+    extractor: YouTubeExtractor,
+    analyzer: VideoAnalyzer,
+    writer: ObsidianVaultWriter,
+    forcar: bool = False,
+    data_leitura: str = None,
+    modo_conferencia: Optional[str] = None
+) -> bool:
     if not data_leitura:
         data_leitura = datetime.date.today().isoformat()
 
@@ -62,6 +70,50 @@ def processar_um_video(url: str, extractor: YouTubeExtractor, analyzer: VideoAna
         else:
             print("    ✓ Áudio capturado para processamento nativo")
 
+        duracao = dados_video.get("duracao_segundos") or 0
+        tem_transcricao = bool(dados_video.get("transcricao"))
+
+        # ------------------------------------------------------------------
+        # Deteção e Processamento de Conferências / Múltiplas Palestras (Scout)
+        # ------------------------------------------------------------------
+        deve_verificar_scout = (
+            modo_conferencia == "split" or
+            (modo_conferencia != "unico" and duracao > config.LIMIAR_VIDEO_LONGO_SEGUNDOS and tem_transcricao)
+        )
+
+        if deve_verificar_scout:
+            print("2/3 🧭 Vídeo longo detetado. A executar 'The Scout' para mapear a agenda da conferência...")
+            try:
+                agenda = analyzer.executar_scout(dados_video)
+                if agenda.eh_conferencia and len(agenda.sessoes) > 1:
+                    dia_rotulo = agenda.dia_rotulo or f"Dia {agenda.dia or 1}"
+                    print(f"    ✓ Conferência detetada: '{agenda.nome_conferencia}' ({dia_rotulo})")
+                    print(f"    ✓ Total de palestras identificadas: {len(agenda.sessoes)}")
+
+                    caminho_moc = analyzer.processar_conferencia_completa(dados_video, agenda, writer, data_leitura)
+
+                    if video_id:
+                        historico[video_id] = {
+                            "titulo": f"{agenda.nome_conferencia} - {dia_rotulo}",
+                            "canal": dados_video.get("canal"),
+                            "url": url,
+                            "data_leitura": data_leitura,
+                            "nota": str(caminho_moc),
+                            "tipo": "conferencia",
+                            "total_palestras": len(agenda.sessoes)
+                        }
+                        gravar_historico(historico)
+
+                    print("\n🎉 Conferência integrada com sucesso no Obsidian!")
+                    return True
+                else:
+                    print("    ℹ️ O Scout determinou que este vídeo é um conteúdo contínuo (não é conferência de múltiplos oradores).")
+            except Exception as e_scout:
+                print(f"    ⚠️ Scout encontrou erro ({e_scout}). A prosseguir com o pipeline normal...")
+
+        # ------------------------------------------------------------------
+        # Pipeline Normal (Vídeos curtos ou monólogos longos consolidados)
+        # ------------------------------------------------------------------
         print("2/3 🧠 A analisar com Gemini Flash (extração de pessoas, livros, temas)...")
         analise = analyzer.analisar(dados_video)
         print(f"    ✓ Título sugerido: {analise.titulo_sugerido}")
@@ -233,14 +285,18 @@ def main():
     parser.add_argument("--lista", "-l", help="Caminho para ficheiro .txt com lista de URLs")
     parser.add_argument("--vault", "-v", default=DEFAULT_VAULT_PATH, help="Caminho para a pasta do Vault do Obsidian")
     parser.add_argument("--forcar", "-f", action="store_true", help="Forçar reprocessamento mesmo se já estiver no histórico")
+    parser.add_argument("--split", action="store_true", help="Forçar modo conferência (dividir em notas por palestra)")
+    parser.add_argument("--unico", action="store_true", help="Forçar nota única consolidada mesmo se for vídeo longo")
     args = parser.parse_args()
 
     extractor = YouTubeExtractor()
     analyzer = VideoAnalyzer()
     writer = ObsidianVaultWriter(args.vault)
 
+    modo_conf = "split" if args.split else ("unico" if args.unico else None)
+
     if args.url:
-        processar_um_video(args.url, extractor, analyzer, writer, forcar=args.forcar)
+        processar_um_video(args.url, extractor, analyzer, writer, forcar=args.forcar, modo_conferencia=modo_conf)
     elif args.lista:
         processar_ficheiro_lista(args.lista, extractor, analyzer, writer, forcar=args.forcar)
     else:
