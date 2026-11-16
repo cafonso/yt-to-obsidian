@@ -5,72 +5,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Set, Optional
 from models import AnaliseVideo, ObraCitada, PessoaMencionada, ArtefactoIA, AgendaScout, SessaoScout, PalestraAnalise
 import config
-
-# ---------------------------------------------------------------------------
-# Heurísticas para distinguir Pessoas de Organizações
-# ---------------------------------------------------------------------------
-
-# Palavras que, se aparecerem no nome, indicam quase certamente uma organização.
-PALAVRAS_ORGANIZACAO = {
-    "inc", "corp", "corporation", "labs", "lab", "university", "universidade",
-    "institute", "instituto", "foundation", "fundação", "foundation",
-    "research", "research", "school", "escola", "college", "center", "centre",
-    "centro", "group", "grupo", "technologies", "technology", "technologies",
-    "systems", "sistemas", "solutions", "solucoes", "solutions",
-    "ai", "ia", "llc", "ltd", "gmbh", "sa", "plc", "holdings",
-    "ventures", "capital", "partners", "studio", "studios",
-    "media", "network", "networks", "cloud", "compute", "semiconductor",
-}
-
-# Organizações conhecidas (comparação case-insensitive, também por prefixo).
-# Ajuda a apanhar nomes compostos como "Google DeepMind" ou "Hugging Face".
-ORGANIZACOES_CONHECIDAS = {
-    "openai", "anthropic", "google", "google deepmind", "deepmind",
-    "microsoft", "meta", "meta ai", "apple", "nvidia", "amd", "intel",
-    "aws", "amazon", "amazon web services", "azure", "google cloud",
-    "hugging face", "huggingface", "mistral", "mistral ai", "cohere",
-    "stability ai", "midjourney", "runway", "perplexity", "xai", "x.ai",
-    "tesla", "spacex", "ibm", "oracle", "salesforce", "databricks",
-    "snowflake", "scale ai", "anyscale", "together ai", "replicate",
-    "vercel", "supabase", "resend", "github", "gitlab", "atlassian",
-    "mit", "stanford", "berkeley", "harvard", "oxford", "cambridge",
-    "cmu", "carnegie mellon", "eth zurich", "epfl", "helmholtz",
-    "deeplearning.ai", "coursera", "udacity", "kaggle",
-    "latent space", "ai engineer", "canonical", "ubuntu", "linux foundation",
-}
-
-def eh_nome_valido_pessoa(nome: str) -> bool:
-    """Valida se o nome parece um nome de pessoa real (Nome + Apelido) e não uma organização ou nome solto."""
-    nome_limpo = nome.strip()
-    if not nome_limpo:
-        return False
-    partes = nome_limpo.split()
-    if len(partes) < 2:
-        # Rejeita nomes próprios isolados como 'Sarah', 'Tim', 'Zach'
-        return False
-    return not eh_organizacao(nome_limpo)
-
-def eh_organizacao(nome: str) -> bool:
-    """Heurística: determina se um nome corresponde a uma organização."""
-    nome_lower = nome.strip().lower()
-    if not nome_lower:
-        return False
-
-    # 1. Match exato contra a lista de organizações conhecidas
-    if nome_lower in ORGANIZACOES_CONHECIDAS:
-        return True
-
-    # 2. Match por prefixo (ex: "google deepmind research" -> começa por "google")
-    for org in ORGANIZACOES_CONHECIDAS:
-        if nome_lower == org or nome_lower.startswith(org + " "):
-            return True
-
-    # 3. Presença de palavras-chave típicas de organizações
-    palavras = set(re.split(r"[\s\-_.,]+", nome_lower))
-    if palavras & PALAVRAS_ORGANIZACAO:
-        return True
-
-    return False
+from utils import eh_nome_valido_pessoa, eh_organizacao
 
 
 def limpar_nome_ficheiro(nome: str) -> str:

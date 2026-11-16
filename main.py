@@ -192,7 +192,7 @@ def processar_ficheiro_lista(caminho_lista: str, extractor: YouTubeExtractor, an
 
 def mostrar_revisao_canonicalizacao():
     """Opção 5: mostra o conteúdo de revisao.md (pares ambíguos para confirmação manual)."""
-    caminho = Path("revisao.md")
+    caminho = config.REVISAO_PATH
     if not caminho.exists():
         print("\n✓ Não há pares para revisão (revisao.md não existe ou está vazio).")
         return

@@ -23,7 +23,8 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
+
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -31,7 +32,7 @@ import yaml
 from rapidfuzz import fuzz, process
 
 from models import ArtefactoIA, ObraCitada, PessoaMencionada
-
+from utils import eh_nome_valido_pessoa 
 
 # ---------------------------------------------------------------------------
 # Normalização base
@@ -264,7 +265,7 @@ class Canonicalizer:
         """
         grupos: Dict[str, PessoaMencionada] = {}
         for p in pessoas:
-            if not p.nome or not p.nome.strip():
+            if not p.nome or not eh_nome_valido_pessoa(p.nome):
                 continue
             canonical, decisao = self._resolver("pessoa", p.nome)
             if not canonical:
@@ -280,6 +281,7 @@ class Canonicalizer:
                 if len(p.papel_ou_bio or "") > len(atual.papel_ou_bio or ""):
                     atual.papel_ou_bio = p.papel_ou_bio
         return list(grupos.values())
+
 
     # ------------------------------------------------------------------
     # API por tipo — artefactos
