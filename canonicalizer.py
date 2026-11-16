@@ -170,6 +170,10 @@ class Canonicalizer:
 
     def gravar(self):
         """Persiste aliases.yaml, decisoes.jsonl e revisao.md (respeitando os flags)."""
+        # Garante que os diretórios existem antes de escrever
+        for p in {self.aliases_path, self.decisoes_path, self.revisao_path}:
+            p.parent.mkdir(parents=True, exist_ok=True)
+
         # 1. aliases.yaml — reescreve o estado atual do dicionário
         if self.aprender_aliases:
             self.aliases_path.write_text(
