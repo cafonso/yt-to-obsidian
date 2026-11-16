@@ -64,9 +64,8 @@ def _calcular_espera(tentativa: int, erro_str: str) -> float:
     return espera
 
 def eh_nome_valido_pessoa(nome: str) -> bool:
-    if not nome or not nome.strip():
-        return False
-    partes = nome.strip().split()
+    # Normaliza espaços e verifica pelo menos duas palavras não vazias
+    partes = [p for p in nome.strip().split() if p]
     return len(partes) >= 2
 
 
@@ -85,6 +84,19 @@ def desduplicar_strings(lista: List[str]) -> List[str]:
             resultado.append(item_limpo)
     return resultado
 
+def _criar_canonicalizer() -> Canonicalizer:
+    """Instancia o Canonicalizer com todas as definições centralizadas no config.py."""
+    return Canonicalizer(
+        aliases_path=config.ALIASES_PATH,
+        decisoes_path=config.DECISOES_PATH,
+        revisao_path=config.REVISAO_PATH,
+        threshold_fusao_auto=config.CANON_THRESHOLD_FUSAO_AUTO,
+        threshold_revisao=config.CANON_THRESHOLD_REVISAO,
+        blocking_por_ultimo_token=config.CANON_BLOCKING_POR_ULTIMO_TOKEN,
+        aprender_aliases=config.CANON_APRENDER_ALIASES,
+        escrever_revisao=config.CANON_ESCREVER_REVISAO,
+        escrever_decisoes=config.CANON_ESCREVER_DECISOES,
+    )
     
 class VideoAnalyzer:
     def __init__(self, model_name: str = None):
@@ -341,17 +353,7 @@ Responde estritamente de acordo com o esquema JSON fornecido.
 
         # Canonicalização de entidades (substitui as desduplicar_* de entidades)
         # ------------------------------------------------------------------
-        canon = Canonicalizer(
-            aliases_path=config.ALIASES_PATH,
-            decisoes_path=config.DECISOES_PATH,
-            revisao_path=config.REVISAO_PATH,
-            threshold_fusao_auto=config.CANON_THRESHOLD_FUSAO_AUTO,
-            threshold_revisao=config.CANON_THRESHOLD_REVISAO,
-            blocking_por_ultimo_token=config.CANON_BLOCKING_POR_ULTIMO_TOKEN,
-            aprender_aliases=config.CANON_APRENDER_ALIASES,
-            escrever_revisao=config.CANON_ESCREVER_REVISAO,
-            escrever_decisoes=config.CANON_ESCREVER_DECISOES,
-        )
+        canon = _criar_canonicalizer()
 
         pessoas_canon = canon.canonicalizar_pessoas(todas_pessoas)
         artefactos_canon = canon.canonicalizar_artefactos(todos_artefactos)
@@ -493,7 +495,7 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         # Canonicalização de entidades (passo único também beneficia)
         # ------------------------------------------------------------------
         analise: AnaliseVideo = response.parsed
-        canon = Canonicalizer()
+        canon = _criar_canonicalizer()
 
         analise.pessoas = canon.canonicalizar_pessoas(analise.pessoas)
         analise.artefactos = canon.canonicalizar_artefactos(analise.artefactos)
@@ -647,7 +649,7 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         print(f"📁 Pasta de destino: Videos/{agenda.nome_conferencia}/")
         print(f"📋 Total de palestras a extrair: {total}\n")
 
-        canon = Canonicalizer()
+        canon = _criar_canonicalizer()
         palestras_processadas = []
 
         for idx, sessao in enumerate(agenda.sessoes, 1):
