@@ -63,12 +63,6 @@ def _calcular_espera(tentativa: int, erro_str: str) -> float:
 
     return espera
 
-def eh_nome_valido_pessoa(nome: str) -> bool:
-    # Normaliza espaços e verifica pelo menos duas palavras não vazias
-    partes = [p for p in nome.strip().split() if p]
-    return len(partes) >= 2
-
-
 def desduplicar_strings(lista: List[str]) -> List[str]:
     """Deduplicação simples para textos livres (métricas, tensões, agenda, recursos).
     Não usar para entidades — essas passam pelo Canonicalizer."""
@@ -133,6 +127,49 @@ class VideoAnalyzer:
                     f"A aguardar {espera:.1f}s antes da tentativa {tentativa + 1}/{max_tentativas}..."
                 )
                 time.sleep(espera)
+                
+    def _preparar_contexto_scout(self, dados_video: Dict[str, Any]) -> str:
+        """
+        Prepara o material para o Scout:
+        1. Se existirem capítulos oficiais no YouTube, usa-os (rápido e barato).
+        2. Caso contrário, compacta a transcrição agrupando blocos a cada 30s
+           para reduzir tokens sem perder nenhum minuto de fala.
+        """
+        capitulos = dados_video.get("capitulos_originais") or []
+        if len(capitulos) >= 3:
+            linhas_cap = [
+                f"- {formatar_tempo(c.get('start_time', 0))} a {formatar_tempo(c.get('end_time', 0))}: {c.get('title', '')}"
+                for c in capitulos
+            ]
+            return "CAPÍTULOS DETETADOS NOS METADADOS DO YOUTUBE:\n" + "\n".join(linhas_cap)
+
+        blocos = dados_video.get("transcricao_blocos") or []
+        if not blocos:
+           transcricao = dados_video.get("transcricao")
+           if not transcricao:
+              raise ValueError("Não há capítulos nem transcrição disponíveis para executar o Scout.")
+           return f"TRANSCRIÇÃO COMPLETA:\n{transcricao}"
+
+        # Agrupa blocos em janelas de ~30 segundos para eliminar timestamps redundantes
+        linhas_compactadas = []
+        buffer_texto = []
+        ts_janela = None
+
+        for b in blocos:
+            if ts_janela is None:
+                ts_janela = b["start"]
+            buffer_texto.append(b["text"])
+
+            if (b["start"] - ts_janela) >= 30:
+                linhas_compactadas.append(f"{formatar_tempo(ts_janela)} {' '.join(buffer_texto)}")
+                buffer_texto = []
+                ts_janela = None
+
+        if buffer_texto and ts_janela is not None:
+            linhas_compactadas.append(f"{formatar_tempo(ts_janela)} {' '.join(buffer_texto)}")
+
+        return "TRANSCRIÇÃO COMPACTADA (JANELAS DE 30s):\n" + "\n".join(linhas_compactadas)
+        
 
     def _fatiar_transcricao(self, blocos: List[Dict[str, Any]], capitulos_originais: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         """Divide a transcrição em segmentos temporais (~30 minutos) respeitando capítulos se existirem."""
@@ -509,23 +546,20 @@ Responde estritamente de acordo com o esquema JSON fornecido.
 
     def executar_scout(self, dados_video: Dict[str, Any]) -> AgendaScout:
         """Executa 'The Scout' para mapear a agenda real de uma conferência ou vídeo longo."""
-        transcricao = dados_video.get("transcricao")
-        if not transcricao:
-            raise ValueError("Não há transcrição disponível para executar o Scout.")
+        contexto_scout = self._preparar_contexto_scout(dados_video)
 
         prompt = f"""
 És um assistente especializado em conferências de tecnologia e estruturação de eventos técnicos.
-Estás a analisar a transcrição completa e os metadados de uma transmissão longa do YouTube ({dados_video.get('duracao_segundos')} segundos).
+Estás a analisar os metadados e o conteúdo de uma transmissão longa do YouTube ({dados_video.get('duracao_segundos')} segundos).
 
 VÍDEO:
 - Título Oficial: {dados_video.get('titulo')}
 - Canal: {dados_video.get('canal')}
 - Duração: {dados_video.get('duracao_segundos')} segundos
 - Descrição do Vídeo:
-{dados_video.get('descricao', '')[:2000]}
+{dados_video.get('descricao', '')[:3000]}
 
-TRANSCRIÇÃO COMPLETA:
-{transcricao}
+{contexto_scout}
 
 OBJETIVO DO SCOUT:
 1. Determina se este vídeo é uma conferência / evento com múltiplas palestras e oradores (eh_conferencia=True), ou se é um monólogo/conversa com uma única pessoa (eh_conferencia=False).
