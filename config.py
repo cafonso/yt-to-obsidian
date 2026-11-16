@@ -30,11 +30,12 @@ DURACAO_CHUNK_SEGUNDOS = int(os.environ.get("DURACAO_CHUNK", 30 * 60))          
 # ---------------------------------------------------------------------------
 
 # Caminhos dos ficheiros de suporte à canonicalização.
-# Relativos ao cwd por defeito; podes apontar para dentro do vault se preferires
-# (ex.: OBSIDIAN_VAULT_PATH/.canonicalizacao/aliases.yaml).
-ALIASES_PATH = os.environ.get("ALIASES_PATH", "aliases.yaml")
-DECISOES_PATH = os.environ.get("DECISOES_PATH", "decisoes.jsonl")
-REVISAO_PATH = os.environ.get("REVISAO_PATH", "revisao.md")
+# Por omissão, usam uma subpasta escondida dentro do vault do Obsidian.
+# Podes sobrepor tudo com CANON_DIR ou cada var individualmente.
+CANON_DIR = Path(os.environ.get("CANON_DIR", Path(DEFAULT_VAULT_PATH) / ".canonicalizacao"))
+ALIASES_PATH = Path(os.environ.get("ALIASES_PATH", CANON_DIR / "aliases.yaml"))
+DECISOES_PATH = Path(os.environ.get("DECISOES_PATH", CANON_DIR / "decisoes.jsonl"))
+REVISAO_PATH = Path(os.environ.get("REVISAO_PATH", CANON_DIR / "revisao.md"))
 
 # Thresholds de fusão fuzzy (0–100). Valores mais altos = menos fusões automáticas.
 CANON_THRESHOLD_FUSAO_AUTO = int(os.environ.get("CANON_THRESHOLD_FUSAO_AUTO", 95))

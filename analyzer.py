@@ -338,10 +338,19 @@ Responde estritamente de acordo com o esquema JSON fornecido.
 
         sintese: SinteseGlobal = resp_sintese.parsed
 
-        # ------------------------------------------------------------------
         # Canonicalização de entidades (substitui as desduplicar_* de entidades)
         # ------------------------------------------------------------------
-        canon = Canonicalizer()
+        canon = Canonicalizer(
+            aliases_path=config.ALIASES_PATH,
+            decisoes_path=config.DECISOES_PATH,
+            revisao_path=config.REVISAO_PATH,
+            threshold_fusao_auto=config.CANON_THRESHOLD_FUSAO_AUTO,
+            threshold_revisao=config.CANON_THRESHOLD_REVISAO,
+            blocking_por_ultimo_token=config.CANON_BLOCKING_POR_ULTIMO_TOKEN,
+            aprender_aliases=config.CANON_APRENDER_ALIASES,
+            escrever_revisao=config.CANON_ESCREVER_REVISAO,
+            escrever_decisoes=config.CANON_ESCREVER_DECISOES,
+        )
 
         pessoas_canon = canon.canonicalizar_pessoas(todas_pessoas)
         artefactos_canon = canon.canonicalizar_artefactos(todos_artefactos)
