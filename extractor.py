@@ -130,8 +130,18 @@ class YouTubeExtractor:
         if os.path.exists("cookies.txt"):
             opcoes['cookiefile'] = "cookies.txt"
 
-        with yt_dlp.YoutubeDL(opcoes) as ydl:
-            ydl.download([url])
+        try:
+            with yt_dlp.YoutubeDL(opcoes) as ydl:
+                ydl.download([url])
+        except Exception:
+            for sufixo in ("", ".part", ".ytdl"):
+                if os.path.exists(caminho_audio + sufixo):
+                    try:
+                        os.remove(caminho_audio + sufixo)
+                    except Exception:
+                        pass
+            raise
+
         return caminho_audio
 
     def extrair_tudo(self, url: str) -> Dict[str, Any]:

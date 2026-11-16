@@ -61,6 +61,7 @@ def processar_um_video(
     print(f"▶️ A processar: {url}")
     print(f"=======================================================")
 
+    dados_video = None
     try:
         print("1/3 📥 A recolher metadados e transcrição do YouTube...")
         dados_video = extractor.extrair_tudo(url)
@@ -147,7 +148,15 @@ def processar_um_video(
     except Exception as e:
         print(f"❌ Erro ao processar o vídeo {url}: {str(e)}")
         return False
-
+    finally:
+        # Garante que o áudio temporário é sempre apagado, mesmo em caso de erro
+        if dados_video and dados_video.get("caminho_audio"):
+            caminho_audio = dados_video["caminho_audio"]
+            if os.path.exists(caminho_audio):
+                try:
+                    os.remove(caminho_audio)
+                except Exception:
+                    pass
 
 def processar_ficheiro_lista(caminho_lista: str, extractor: YouTubeExtractor, analyzer: VideoAnalyzer, writer: ObsidianVaultWriter, forcar: bool = False):
     if not os.path.exists(caminho_lista):
