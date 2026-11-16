@@ -5,6 +5,7 @@ import json
 import datetime
 import argparse
 from pathlib import Path
+from typing import Optional
 
 # Garante suporte a UTF-8 no terminal Windows para emojis e acentos
 if hasattr(sys.stdout, "reconfigure"):
