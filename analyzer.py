@@ -9,6 +9,7 @@ from extractor import formatar_tempo
 from canonicalizer import Canonicalizer
 import random
 import re
+from config import FALLBACK_MODEL
 
 def _extrair_retry_after(erro_str: str) -> Optional[float]:
     """
@@ -88,7 +89,7 @@ def desduplicar_strings(lista: List[str]) -> List[str]:
 class VideoAnalyzer:
     def __init__(self, model_name: str = None):
         self.model_name = model_name or config.MODELO_GEMINI
-        self.fallback_model = "gemini-3.5-flash-lite"
+        self.fallback_model = FALLBACK_MODEL
         # Usamos v1beta para suporte completo a JSON schema com Pydantic
         self.client = genai.Client(http_options={'api_version': 'v1beta'})
 
