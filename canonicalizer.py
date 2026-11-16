@@ -188,15 +188,36 @@ class Canonicalizer:
                 for d in self._decisoes:
                     f.write(json.dumps(d.to_dict(), ensure_ascii=False) + "\n")
 
-        # 3. revisao.md — reescreve com os pares ambíguos desta execução
+       
+        # 3. revisao.md — acrescenta apenas pares ambíguos inéditos
         if self.escrever_revisao and self._revisao:
-            linhas = ["# Revisão de canonicalização\n"]
+            cabecalho = "# Revisão de canonicalização"
+            linhas_existentes: List[str] = []
+
+            if self.revisao_path.exists():
+                conteudo_atual = self.revisao_path.read_text(encoding="utf-8")
+                linhas_existentes = [
+                    l.strip() for l in conteudo_atual.splitlines()
+                    if l.strip() and l.strip() != cabecalho
+                ]
+
+            # Conjunto para deduplicar pela assinatura do par (ignora variações de score)
+            pares_registados = set()
+            for linha in linhas_existentes:
+                # Extrai a parte "- **tipo**: `raw` → `canonical`"
+                chave = linha.split(" (score ")[0]
+                pares_registados.add(chave)
+
+            novas_linhas = []
             for d in self._revisao:
-                linhas.append(
-                    f"- **{d.tipo}**: `{d.raw}` → `{d.canonical}` "
-                    f"(score {d.score}, método {d.metodo})"
-                )
-            self.revisao_path.write_text("\n".join(linhas) + "\n", encoding="utf-8")
+                assinatura = f"- **{d.tipo}**: `{d.raw}` → `{d.canonical}`"
+                if assinatura not in pares_registados:
+                    pares_registados.add(assinatura)
+                    novas_linhas.append(f"{assinatura} (score {d.score}, método {d.metodo})")
+
+            if novas_linhas or not self.revisao_path.exists():
+                todas_linhas = [cabecalho, ""] + linhas_existentes + novas_linhas
+                self.revisao_path.write_text("\n".join(todas_linhas) + "\n", encoding="utf-8")
 
     # ------------------------------------------------------------------
     # Núcleo: resolução de um nome
