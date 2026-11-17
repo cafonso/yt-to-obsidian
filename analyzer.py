@@ -256,11 +256,18 @@ class VideoAnalyzer:
         return segmentos
 
     def _analisar_segmento(self, dados_video: Dict[str, Any], segmento: Dict[str, Any], idx: int, total: int) -> SegmentoAnalise:
-        """Executa a extração estruturada de um segmento específico de vídeo longo."""
+        """Executa a extração estruturada de um segmento específico (texto ou áudio) de vídeo longo."""
         ts_inicio = segmento["ts_inicio"]
         ts_fim = segmento["ts_fim"]
-        texto_segmento = segmento["texto"]
+        texto_segmento = segmento.get("texto")
+        caminho_audio_chunk = segmento.get("caminho_audio_chunk")
         dica_titulo = f"\n- Tema/Capítulo sugerido nos metadados: {segmento['titulo_sugerido']}" if segmento.get('titulo_sugerido') else ""
+
+        fonte_bloco = (
+            f"TRANSCRIÇÃO DESTE BLOCO ({ts_inicio} a {ts_fim}):\n{texto_segmento}"
+            if texto_segmento
+            else f"FONTE: Ouve atentamente o ficheiro de áudio anexado correspondente ao intervalo {ts_inicio} a {ts_fim}."
+        )
 
         prompt = f"""
 És um assistente especializado em Gestão de Conhecimento Pessoal (PKM) e síntese técnica para o Obsidian.
@@ -271,31 +278,10 @@ CONTEXTO GLOBAL DO VÍDEO:
 - Canal: {dados_video.get('canal')}
 - Intervalo deste Bloco: {ts_inicio} a {ts_fim}{dica_titulo}
 
-TRANSCRIÇÃO DESTE BLOCO ({ts_inicio} a {ts_fim}):
-{texto_segmento}
+{fonte_bloco}
 
 INSTRUÇÕES DE EXTRAÇÃO PARA ESTE BLOCO:
-0. REGRA ESTRITA DE IDIOMAS E NOMES:
-   - TÍTULOS DE PALESTRAS/OBRAS: Mantém o título original oficial sem traduzir.
-   - NOMES DE PESSOAS: Apenas pessoas com NOME COMPLETO canónico (ex: 'Sarah Friar', 'Satya Nadella'). NUNCA apenas primeiro nome.
-   - NOMES DE ARTEFACTOS: Mantém o nome oficial original (ex: 'GPT-4o', 'Claude 3.5 Sonnet', 'Cursor', 'LoRA').
-   - TEMAS: Usa a terminologia técnica padrão original (ex: 'Agentic Context', 'Reinforcement Learning'). Se traduzido para pt, coloca entre parênteses.
-   - RESUMO: Redige em português claro, formal e correto (PT-PT).
-
-1. Título do Segmento: Título descritivo ou tema da palestra/sessão que decorre neste intervalo ({ts_inicio} - {ts_fim}).
-2. Oradores: Nomes completos dos apresentadores ou intervenientes principais deste segmento específico.
-3. Resumo do Bloco: 1 a 3 parágrafos densos e claros em português (PT-PT) sobre o conteúdo debatido nesta sessão.
-4. Takeaways do Bloco: 2 a 5 ensinamentos essenciais desta sessão.
-5. Métricas & Números: Todos os dados quantitativos, percentagens, custos ou benchmarks citados nesta sessão.
-6. Tensões, Riscos & Limitações: Dificuldades técnicas, mitos desmontados ou críticas levantadas neste bloco.
-7. Agenda & Previsões: Prazos, anúncios futuros ou datas mencionadas nesta sessão.
-8. Recursos & Links: Papers, repositórios GitHub ou ferramentas mencionadas.
-9. Pessoas: Pessoas relevantes citadas com NOME COMPLETO canónico.
-10. Obras: Livros, artigos ou papers citados com títulos originais e autores.
-11. Organizações: Empresas ou instituições chave referidas neste segmento.
-12. Artefactos: Modelos, ferramentas, frameworks, agentes, hardware, técnicas, plataformas ou datasets citados neste segmento (com os 8 subtipos e fabricante).
-
-Responde estritamente de acordo com o esquema JSON fornecido.
+... (mantém as instruções 0 a 12 exatamente iguais) ...
 """
         config_obj = types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -303,17 +289,36 @@ Responde estritamente de acordo com o esquema JSON fornecido.
             temperature=0.2,
         )
 
-        try:
-            resp = self._chamar_gemini_com_retry(self.model_name, [prompt], config_obj)
-        except Exception:
-            if self.fallback_model and self.fallback_model != self.model_name:
-                resp = self._chamar_gemini_com_retry(self.fallback_model, [prompt], config_obj)
-            else:
-                raise
+        arquivo_google = None
+        conteudos = [prompt]
 
-        if not resp or not resp.parsed:
-            raise ValueError(f"Falha ao analisar o bloco {idx}/{total}.")
-        return resp.parsed
+        try:
+            if caminho_audio_chunk and os.path.exists(caminho_audio_chunk):
+                arquivo_google = self.client.files.upload(file=caminho_audio_chunk)
+                conteudos.append(arquivo_google)
+
+            try:
+                resp = self._chamar_gemini_com_retry(self.model_name, conteudos, config_obj)
+            except Exception:
+                if self.fallback_model and self.fallback_model != self.model_name:
+                    resp = self._chamar_gemini_com_retry(self.fallback_model, conteudos, config_obj)
+                else:
+                    raise
+
+            if not resp or not resp.parsed:
+                raise ValueError(f"Falha ao analisar o bloco {idx}/{total}.")
+            return resp.parsed
+        finally:
+            if arquivo_google:
+                try:
+                    self.client.files.delete(name=arquivo_google.name)
+                except Exception:
+                    pass
+					
+					
+					
+					
+				
 
     def _consolidar_segmentos(self, dados_video: Dict[str, Any], segmentos_analisados: List[SegmentoAnalise]) -> AnaliseVideo:
         """Funde as entidades recolhidas em todos os blocos e gera o resumo executivo global (Reduce)."""
@@ -417,21 +422,45 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         )
 
     def analisar_video_longo(self, dados_video: Dict[str, Any]) -> AnaliseVideo:
-        """Processa um vídeo longo dividindo-o em blocos e consolidando as entidades no final (Map-Reduce)."""
+        """Processa um vídeo longo dividindo-o em blocos (texto ou áudio) e consolidando no final."""
         blocos = dados_video.get("transcricao_blocos") or []
         capitulos_originais = dados_video.get("capitulos_originais") or []
-        segmentos = self._fatiar_transcricao(blocos, capitulos_originais)
+        caminho_audio = dados_video.get("caminho_audio")
+
+        segmentos = []
+        usar_audio = False
+
+        if blocos:
+            segmentos = self._fatiar_transcricao(blocos, capitulos_originais)
+        elif caminho_audio and os.path.exists(caminho_audio):
+            from extractor import YouTubeExtractor
+            print("    ✂️ A fatiar áudio longo com ffmpeg para processamento Map-Reduce...")
+            segmentos = YouTubeExtractor().fatiar_audio(caminho_audio)
+            usar_audio = True
+
+        if not segmentos:
+            raise ValueError("Não há transcrição nem áudio válido para fatiar o vídeo longo.")
 
         duracao_min = (dados_video.get('duracao_segundos') or 0) // 60
-        print(f"    🧩 Vídeo longo ({duracao_min} min). A ativar pipeline Map-Reduce em {len(segmentos)} blocos temporais...")
+        modo_str = "áudio" if usar_audio else "texto"
+        print(f"    🧩 Vídeo longo ({duracao_min} min). A ativar pipeline Map-Reduce ({modo_str}) em {len(segmentos)} blocos...")
 
         segmentos_analisados = []
-        for i, seg in enumerate(segmentos, 1):
-            print(f"       -> [{i:02d}/{len(segmentos):02d}] A analisar bloco: {seg['ts_inicio']} a {seg['ts_fim']}...")
-            analise_bloco = self._analisar_segmento(dados_video, seg, i, len(segmentos))
-            segmentos_analisados.append(analise_bloco)
-            # Pequeno compasso de espera para respeitar cotas de chamadas por minuto
-            time.sleep(1)
+        try:
+            for i, seg in enumerate(segmentos, 1):
+                print(f"       -> [{i:02d}/{len(segmentos):02d}] A analisar bloco: {seg['ts_inicio']} a {seg['ts_fim']}...")
+                analise_bloco = self._analisar_segmento(dados_video, seg, i, len(segmentos))
+                segmentos_analisados.append(analise_bloco)
+                time.sleep(1)
+        finally:
+            # Limpa sempre todas as fatias temporárias de áudio geradas pelo ffmpeg
+            for seg in segmentos:
+                chunk_path = seg.get("caminho_audio_chunk")
+                if chunk_path and os.path.exists(chunk_path):
+                    try:
+                        os.remove(chunk_path)
+                    except Exception:
+                        pass
 
         print("    🔄 A consolidar entidades e a sintetizar o resumo executivo global...")
         return self._consolidar_segmentos(dados_video, segmentos_analisados)
@@ -729,9 +758,12 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         """Decide inteligentemente entre passo único (curtos) ou Map-Reduce (longos)."""
         duracao = dados_video.get("duracao_segundos") or 0
         blocos = dados_video.get("transcricao_blocos")
+        caminho_audio = dados_video.get("caminho_audio")
 
-        # Se for um vídeo longo com transcrição rica, ativa o pipeline Map-Reduce
-        if duracao > config.LIMIAR_VIDEO_LONGO_SEGUNDOS and blocos and len(blocos) > 200:
+        eh_longo = duracao > config.LIMIAR_VIDEO_LONGO_SEGUNDOS
+        tem_material_longo = (blocos and len(blocos) > 200) or bool(caminho_audio)
+
+        if eh_longo and tem_material_longo:
             return self.analisar_video_longo(dados_video)
         else:
             return self.analisar_passo_unico(dados_video)

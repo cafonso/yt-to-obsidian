@@ -3,6 +3,9 @@ import os
 from typing import Optional, Dict, Any, List
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 import yt_dlp
+import subprocess
+import glob
+import config
 
 def extrair_id_youtube(url: str) -> Optional[str]:
     """Extrai o ID de 11 caracteres de URLs do YouTube."""
@@ -55,7 +58,44 @@ class YouTubeExtractor:
                 "descricao": info.get("description", ""),
                 "capitulos_originais": info.get("chapters") or []
             }
+    def fatiar_audio(self, caminho_audio: str, duracao_chunk: int = None) -> List[Dict[str, Any]]:
+        """
+        Divide um ficheiro .m4a longo em segmentos usando ffmpeg (-c copy, sem re-encoding).
+        Devolve uma lista de dicionários compatível com o pipeline Map-Reduce.
+        """
+        if duracao_chunk is None:
+            duracao_chunk = config.DURACAO_CHUNK_SEGUNDOS
 
+        base_nome = os.path.splitext(caminho_audio)[0]
+        padrao_saida = f"{base_nome}_part_%03d.m4a"
+
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i", caminho_audio,
+            "-f", "segment",
+            "-segment_time", str(duracao_chunk),
+            "-c", "copy",
+            "-reset_timestamps", "1",
+            padrao_saida
+        ]
+
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+        ficheiros_partes = sorted(glob.glob(f"{base_nome}_part_*.m4a"))
+        segmentos = []
+        for idx, ficheiro in enumerate(ficheiros_partes):
+            inicio_s = idx * duracao_chunk
+            fim_s = (idx + 1) * duracao_chunk
+            segmentos.append({
+                "ts_inicio": formatar_tempo(inicio_s),
+                "ts_fim": formatar_tempo(fim_s),
+                "titulo_sugerido": None,
+                "texto": None,
+                "caminho_audio_chunk": ficheiro
+            })
+
+        return segmentos
     def obter_transcricao_blocos(self, video_id: str) -> Optional[List[Dict[str, Any]]]:
         """Tenta obter os blocos brutos da transcrição (start, duration, text)."""
         blocos = None

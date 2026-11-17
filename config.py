@@ -19,8 +19,8 @@ SUBTIPOS_ARTEFACTO = {
 }
 
 # Modelo Gemini predefinido
-MODELO_GEMINI = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-FALLBACK_MODEL = "gemini-2.5-flash-lite"  # ajusta se confirmares outro nome válido
+MODELO_GEMINI = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
+FALLBACK_MODEL = "gemini-3.5-flash-lite"  # ajusta se confirmares outro nome válido
 
 # Parâmetros para processamento de vídeos longos (fatiamento Map-Reduce)
 LIMIAR_VIDEO_LONGO_SEGUNDOS = int(os.environ.get("LIMIAR_VIDEO_LONGO", 45 * 60))  # 45 minutos
@@ -73,3 +73,4 @@ GEMINI_BACKOFF_BASE_503 = float(os.environ.get("GEMINI_BACKOFF_BASE_503", 5.0))
 
 # Se True, tenta ler o header Retry-After da resposta e respeitá-lo.
 GEMINI_RESPEITAR_RETRY_AFTER = os.environ.get("GEMINI_RESPEITAR_RETRY_AFTER", "1") == "1"
+DURACAO_CHUNK_SEGUNDOS = 1800
