@@ -7,6 +7,7 @@ import streamlit as st
 
 import config
 from extrator import YouTubeExtractor, extrair_id_youtube
+import extrator
 from analyzer import VideoAnalyzer
 from vault_writer import ObsidianVaultWriter
 from main import processar_um_video, carregar_historico
@@ -111,7 +112,14 @@ with tab_processar:
 
     if iniciar:
         linhas_raw = [l.strip() for l in urls_texto.splitlines() if l.strip() and not l.strip().startswith("#")]
-
+        linhas_raw = []
+        for l in urls_texto.splitlines():
+             l_limpa = l.strip()
+             if l_limpa and not l_limpa.startswith("#"):
+                # Divide por espaços e pega apenas no primeiro item (o URL limpo), 
+                # ignorando flags coladas à frente como --forcar ou --unico
+                url_puro = l_limpa.split()[0]
+                linhas_raw.append(url_puro)
         if not linhas_raw:
             st.warning("Introduza pelo menos um URL do YouTube válido.")
         else:
@@ -129,7 +137,7 @@ with tab_processar:
                 st.subheader("📡 Progresso em Tempo Real (Scout / Map-Reduce / Vault)")
                 log_area = st.empty()
 
-                extractor = YouTubeExtractor()
+                extrator = YouTubeExtractor()
                 analyzer = VideoAnalyzer()
                 writer = ObsidianVaultWriter(vault_path, validar_links=validar_links)
 
@@ -144,7 +152,7 @@ with tab_processar:
                         status_box.info(f"A processar [{idx}/{total}]: `{url}`")
                         ok = processar_um_video(
                             url=url,
-                            extractor=extractor,
+                            extrator=extrator,
                             analyzer=analyzer,
                             writer=writer,
                             forcar=forcar,

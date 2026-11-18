@@ -5,7 +5,7 @@ from google import genai
 from google.genai import types
 from models import AnaliseVideo, SegmentoAnalise, SinteseGlobal, PessoaMencionada, ArtefactoIA, ObraCitada, AgendaScout, SessaoScout, PalestraAnalise
 import config
-from extractor import formatar_tempo
+from extrator import formatar_tempo
 from canonicalizer import Canonicalizer
 import random
 import re
@@ -439,7 +439,7 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         if blocos:
             segmentos = self._fatiar_transcricao(blocos, capitulos_originais)
         elif caminho_audio and os.path.exists(caminho_audio):
-            from extractor import YouTubeExtractor
+            from extrator import YouTubeExtractor
             print("    ✂️ A fatiar áudio longo com ffmpeg para processamento Map-Reduce...")
             segmentos = YouTubeExtractor().fatiar_audio(caminho_audio)
             usar_audio = True
@@ -616,10 +616,10 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         )
 
         try:
-            resp = self._chamar_gemini_com_retry(self.model_name, [prompt], config_obj)
+            resp = self._chamar_gemini_com_retry(config.MODELO_SCOUT, [prompt, contexto_scout], config_obj)
         except Exception:
-            if self.fallback_model and self.fallback_model != self.model_name:
-                resp = self._chamar_gemini_com_retry(self.fallback_model, [prompt], config_obj)
+            if self.fallback_model and self.fallback_model != config.MODELO_SCOUT:
+                resp = self._chamar_gemini_com_retry(self.fallback_model, [prompt, contexto_scout], config_obj)
             else:
                 raise
 
