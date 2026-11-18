@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 
 from utils import eh_organizacao, eh_nome_valido_pessoa
-from extractor import extrair_id_youtube, formatar_tempo
+from extrator import extrair_id_youtube, formatar_tempo
 from canonicalizer import norm, chave_bloqueio, Canonicalizer
 
 

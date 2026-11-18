@@ -12,15 +12,9 @@ def extrair_id_youtube(url: str) -> Optional[str]:
     padrao = r'(?:v=|\/v\/|youtu\.be\/|\/embed\/|\/shorts\/|^)([A-Za-z0-9_-]{11})'
     match = re.search(padrao, url)
     return match.group(1) if match else None
+
     
-def validar_url_youtube(url: str) -> bool:
-    """Valida se uma string é um URL do YouTube estruturalmente válido."""
-    if not url or not isinstance(url, str):
-        return False
-    url = url.strip()
-    # Verifica se o ID extraído é válido (exatamente 11 caracteres)
-    video_id = extrair_id_youtube(url)
-    return video_id is not None and len(video_id) == 11    
+
 
 def formatar_tempo(segundos: float) -> str:
     """Converte segundos para formato [HH:MM:SS] ou [MM:SS]."""
@@ -34,6 +28,15 @@ def formatar_tempo(segundos: float) -> str:
 class YouTubeExtractor:
     def __init__(self, idiomas_preferenciais: Optional[List[str]] = None):
         self.idiomas = idiomas_preferenciais or ['pt', 'pt-PT', 'pt-BR', 'en', 'en-US', 'es']
+        
+    def validar_url_youtube(self, url: str) -> bool:
+       """Valida se uma string é um URL do YouTube estruturalmente válido."""
+       if not url or not isinstance(url, str):
+          return False
+       url = url.strip()
+       # Verifica se o ID extraído é válido (exatamente 11 caracteres)
+       video_id = extrair_id_youtube(url)
+       return video_id is not None and len(video_id) == 11    
 
     def obter_metadados(self, url: str) -> Dict[str, Any]:
         """Recolhe título, canal, data e descrição via yt-dlp sem fazer download do vídeo."""
@@ -195,7 +198,7 @@ class YouTubeExtractor:
 
     def extrair_tudo(self, url: str) -> Dict[str, Any]:
         
-        if not validar_url_youtube(url):
+        if not self.validar_url_youtube(url):
             raise ValueError(f"URL do YouTube inválido ou malformado: '{url}'")
             
         """Combina metadados e transcrição ou ativa o áudio fallback em caso de bloqueio."""

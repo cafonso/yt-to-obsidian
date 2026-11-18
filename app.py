@@ -6,7 +6,7 @@ from pathlib import Path
 import streamlit as st
 
 import config
-from extractor import YouTubeExtractor, extrair_id_youtube
+from extrator import YouTubeExtractor, extrair_id_youtube
 from analyzer import VideoAnalyzer
 from vault_writer import ObsidianVaultWriter
 from main import processar_um_video, carregar_historico

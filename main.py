@@ -16,7 +16,7 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 import config
-from extractor import YouTubeExtractor, extrair_id_youtube
+from extrator import YouTubeExtractor, extrair_id_youtube
 from analyzer import VideoAnalyzer
 from vault_writer import ObsidianVaultWriter
 
@@ -39,7 +39,7 @@ def gravar_historico(historico: dict):
 
 def processar_um_video(
     url: str,
-    extractor: YouTubeExtractor,
+    extrator: YouTubeExtractor,
     analyzer: VideoAnalyzer,
     writer: ObsidianVaultWriter,
     forcar: bool = False,
@@ -64,7 +64,7 @@ def processar_um_video(
     dados_video = None
     try:
         print("1/3 📥 A recolher metadados e transcrição do YouTube...")
-        dados_video = extractor.extrair_tudo(url)
+        dados_video = extrator.extrair_tudo(url)
         print(f"    ✓ Título: {dados_video['titulo']}")
         print(f"    ✓ Canal: {dados_video['canal']}")
         if dados_video.get('transcricao'):
@@ -157,7 +157,7 @@ def processar_um_video(
                     os.remove(caminho_audio)
                 except Exception:
                     pass
-def processar_ficheiro_lista(caminho_lista: str, extractor: YouTubeExtractor, analyzer: VideoAnalyzer, writer: ObsidianVaultWriter, forcar: bool = False):
+def processar_ficheiro_lista(caminho_lista: str, extrator: YouTubeExtractor, analyzer: VideoAnalyzer, writer: ObsidianVaultWriter, forcar: bool = False):
     caminho = Path(caminho_lista)
     if not caminho.exists():
         print(f"❌ Erro: O ficheiro de lista '{caminho_lista}' não foi encontrado.")
@@ -196,8 +196,8 @@ def processar_ficheiro_lista(caminho_lista: str, extractor: YouTubeExtractor, an
             continue
             
         # Validar se a linha parece um URL válido do YouTube
-        if extractor.validar_url_youtube(linha) or "youtube.com" in linha or "youtu.be" in linha:
-            if extractor.validar_url_youtube(linha):
+        if extrator.validar_url_youtube(linha) or "youtube.com" in linha or "youtu.be" in linha:
+            if extrator.validar_url_youtube(linha):
                 entradas.append((linha, data_leitura_atual))
             else:
                 erros_formato += 1
@@ -216,7 +216,7 @@ def processar_ficheiro_lista(caminho_lista: str, extractor: YouTubeExtractor, an
     sucessos = 0
     for idx, (url, data_leitura) in enumerate(entradas, 1):
         print(f"\n[{idx}/{total}]")
-        if processar_um_video(url, extractor, analyzer, writer, forcar=forcar, data_leitura=data_leitura):
+        if processar_um_video(url, extrator, analyzer, writer, forcar=forcar, data_leitura=data_leitura):
             sucessos += 1
 
     print(f"\n=======================================================")
@@ -266,7 +266,7 @@ def mostrar_config_canonicalizacao():
 
 
 def menu_interativo(vault_path: str):
-    extractor = YouTubeExtractor()
+    extrator = YouTubeExtractor()
     analyzer = VideoAnalyzer()
     writer = ObsidianVaultWriter(vault_path)
 
@@ -289,13 +289,13 @@ def menu_interativo(vault_path: str):
         if opcao == "1":
             url = input("\nCola o link do YouTube: ").strip()
             if url:
-                processar_um_video(url, extractor, analyzer, writer, forcar=True)
+                processar_um_video(url, extrator, analyzer, writer, forcar=True)
         elif opcao == "2":
-            processar_ficheiro_lista("lista_de_videos.txt", extractor, analyzer, writer)
+            processar_ficheiro_lista("lista_de_videos.txt", extrator, analyzer, writer)
         elif opcao == "3":
             caminho = input("\nNome do ficheiro de texto: ").strip()
             if caminho:
-                processar_ficheiro_lista(caminho, extractor, analyzer, writer)
+                processar_ficheiro_lista(caminho, extrator, analyzer, writer)
         elif opcao == "4":
             novo_vault = input("\nNovo caminho para a pasta do teu Vault do Obsidian: ").strip()
             if novo_vault:
@@ -323,16 +323,16 @@ def main():
     parser.add_argument("--unico", action="store_true", help="Forçar nota única consolidada mesmo se for vídeo longo")
     args = parser.parse_args()
 
-    extractor = YouTubeExtractor()
+    extrator = YouTubeExtractor()
     analyzer = VideoAnalyzer()
     writer = ObsidianVaultWriter(args.vault)
 
     modo_conf = "split" if args.split else ("unico" if args.unico else None)
 
     if args.url:
-        processar_um_video(args.url, extractor, analyzer, writer, forcar=args.forcar, modo_conferencia=modo_conf)
+        processar_um_video(args.url, extrator, analyzer, writer, forcar=args.forcar, modo_conferencia=modo_conf)
     elif args.lista:
-        processar_ficheiro_lista(args.lista, extractor, analyzer, writer, forcar=args.forcar)
+        processar_ficheiro_lista(args.lista, extrator, analyzer, writer, forcar=args.forcar)
     else:
         menu_interativo(args.vault)
 
