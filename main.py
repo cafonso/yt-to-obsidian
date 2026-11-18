@@ -157,36 +157,61 @@ def processar_um_video(
                     os.remove(caminho_audio)
                 except Exception:
                     pass
-
 def processar_ficheiro_lista(caminho_lista: str, extractor: YouTubeExtractor, analyzer: VideoAnalyzer, writer: ObsidianVaultWriter, forcar: bool = False):
-    if not os.path.exists(caminho_lista):
-        print(f"Erro: O ficheiro '{caminho_lista}' não foi encontrado.")
+    caminho = Path(caminho_lista)
+    if not caminho.exists():
+        print(f"❌ Erro: O ficheiro de lista '{caminho_lista}' não foi encontrado.")
         return
 
-    # Parser que suporta cabeçalhos de data: # YYYY-MM-DD
-    # Todos os outros comentários (# texto livre) são ignorados normalmente.
     PADRAO_DATA = re.compile(r'^#\s*(\d{4}-\d{2}-\d{2})\s*$')
-    data_leitura_atual = datetime.date.today().isoformat()  # default: hoje
-    entradas = []  # lista de (url, data_leitura)
+    data_leitura_atual = datetime.date.today().isoformat()
+    entradas = []
+    erros_formato = 0
 
-    with open(caminho_lista, "r", encoding="utf-8") as f:
-        for linha in f:
-            linha = linha.strip()
-            if not linha:
-                continue
-            match_data = PADRAO_DATA.match(linha)
-            if match_data:
-                # Cabeçalho de data — atualiza o contexto temporal
-                data_leitura_atual = match_data.group(1)
+    try:
+        linhas = caminho.read_text(encoding="utf-8").splitlines()
+    except Exception as e:
+        print(f"❌ Erro ao ler o ficheiro '{caminho_lista}': {e}")
+        return
+
+    for num_linha, linha in enumerate(linhas, 1):
+        linha = linha.strip()
+        if not linha:
+            continue
+            
+        match_data = PADRAO_DATA.match(linha)
+        if match_data:
+            data_str = match_data.group(1)
+            # Validação simples da data
+            try:
+                datetime.date.fromisoformat(data_str)
+                data_leitura_atual = data_str
                 print(f"📅 Contexto de data alterado para: {data_leitura_atual}")
-            elif linha.startswith("#"):
-                # Comentário livre — ignora
-                continue
-            else:
+            except ValueError:
+                print(f"⚠️ Aviso (linha {num_linha}): Data inválida encontrada '{data_str}'. A manter a anterior.")
+            continue
+            
+        if linha.startswith("#"):
+            # Comentário livre
+            continue
+            
+        # Validar se a linha parece um URL válido do YouTube
+        if extractor.validar_url_youtube(linha) or "youtube.com" in linha or "youtu.be" in linha:
+            if extractor.validar_url_youtube(linha):
                 entradas.append((linha, data_leitura_atual))
+            else:
+                erros_formato += 1
+                print(f"⚠️ Aviso (linha {num_linha}): URL do YouTube aparentemente inválido ou incompleto -> '{linha}'")
+        else:
+            erros_formato += 1
+            print(f"⚠️ Aviso (linha {num_linha}): Linha ignorada por não ser um URL nem um cabeçalho válido -> '{linha}'")
 
     total = len(entradas)
-    print(f"\n📋 Foram encontrados {total} vídeos para processar em lote.\n")
+    print(f"\n📋 Foram validados com sucesso {total} vídeos para processar em lote. (Erros/Avisos ignorados: {erros_formato})\n")
+
+    if total == 0:
+        print("ℹ️ Nenhum URL válido encontrado para processar.")
+        return
 
     sucessos = 0
     for idx, (url, data_leitura) in enumerate(entradas, 1):
@@ -195,10 +220,9 @@ def processar_ficheiro_lista(caminho_lista: str, extractor: YouTubeExtractor, an
             sucessos += 1
 
     print(f"\n=======================================================")
-    print(f"🏁 Processamento Concluído: {sucessos}/{total} vídeos verificados/integrados no Obsidian!")
+    print(f"🏁 Processamento Concluído: {sucessos}/{total} vídeos integrados com sucesso!")
     print(f"=======================================================\n")
-
-
+    
 def mostrar_revisao_canonicalizacao():
     """Opção 5: mostra o conteúdo de revisao.md (pares ambíguos para confirmação manual)."""
     caminho = config.REVISAO_PATH

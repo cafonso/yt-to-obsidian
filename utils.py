@@ -1,5 +1,63 @@
 import re
 
+import urllib.request
+import urllib.error
+from typing import List, Optional
+
+def verificar_link_ativo(url: str, timeout: float = 3.0) -> bool:
+    """
+    Verifica de forma leve e rápida se um URL está ativo (retorna código HTTP de sucesso ou redirecionamento).
+    Usa um pedido HEAD para evitar descarregar o corpo da página.
+    """
+    if not url or not url.startswith(("http://", "https://")):
+        return False
+
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 (Compatible; ObsidianPKMBot/1.0)"},
+        method="HEAD"
+    )
+    
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return 200 <= response.status < 400
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, Exception):
+        # Em caso de erro num pedido HEAD, tenta um GET rápido (alguns servidores rejeitam HEAD)
+        try:
+            req_get = urllib.request.Request(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (Compatible; ObsidianPKMBot/1.0)"},
+                method="GET"
+            )
+            # Lê apenas os primeiros bytes ou usa timeout curto
+            with urllib.request.urlopen(req_get, timeout=timeout) as response:
+                return 200 <= response.status < 400
+        except Exception:
+            return False
+
+def filtrar_recursos_ativos(recursos: List[str]) -> List[str]:
+    """
+    Filtra uma lista de recursos/links, mantendo apenas aqueles que respondem ativamente.
+    Adiciona um comentário subtil ou remove os que falharem, ou preserva-os com um aviso.
+    """
+    recursos_validados = []
+    for recurso in recursos:
+        # Extrai URLs se o formato incluir Markdown do tipo [Texto](URL) ou texto livre
+        import re
+        urls = re.findall(r'https?://[^\s\]\)]+', recurso)
+        
+        if urls:
+            url_alvo = urls[0]
+            if verificar_link_ativo(url_alvo):
+                recursos_validados.append(recurso)
+            else:
+                # Opcional: Mantém o recurso mas sinaliza que pode estar inativo
+                recursos_validados.append(f"{recurso} ⚠️ *(Link possivelmente inativo)*")
+        else:
+            recursos_validados.append(recurso)
+            
+    return recursos_validados
+
 PALAVRAS_ORGANIZACAO = {
     "inc", "corp", "corporation", "labs", "lab", "university", "universidade",
     "institute", "instituto", "foundation", "fundação",

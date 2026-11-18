@@ -1,6 +1,9 @@
 import os
 import re
+import asyncio
 import datetime
+import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional
 from models import AnaliseVideo, ObraCitada, PessoaMencionada, ArtefactoIA, AgendaScout, SessaoScout, PalestraAnalise
@@ -17,9 +20,67 @@ def limpar_nome_ficheiro(nome: str) -> str:
     return nome_limpo[:120]
 
 
+def _verificar_url_sincrono(url: str, timeout: float = 3.5) -> bool:
+    """Verifica de forma leve se um URL responde com sucesso (200-399)."""
+    if not url or not url.startswith(("http://", "https://")):
+        return False
+
+    headers = {"User-Agent": "Mozilla/5.0 (Compatible; ObsidianPKMBot/1.0)"}
+
+    # 1. Tenta pedido HEAD (mais rápido, sem descarregar conteúdo)
+    try:
+        req_head = urllib.request.Request(url, headers=headers, method="HEAD")
+        with urllib.request.urlopen(req_head, timeout=timeout) as resp:
+            return 200 <= resp.status < 400
+    except Exception:
+        pass
+
+    # 2. Fallback para GET leve (alguns servidores bloqueiam HEAD)
+    try:
+        req_get = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(req_get, timeout=timeout) as resp:
+            return 200 <= resp.status < 400
+    except Exception:
+        return False
+
+
+async def _validar_lista_recursos_async(recursos: List[str], timeout: float = 3.5) -> List[str]:
+    """Verifica todos os links da lista em paralelo e sinaliza os que estiverem inativos."""
+    if not recursos:
+        return []
+
+    async def processar_item(recurso: str) -> str:
+        urls = re.findall(r'https?://[^\s\]\)]+', recurso)
+        if not urls:
+            return recurso
+
+        # Limpa eventual pontuação final presa ao URL (ex: ponto final ou vírgula)
+        url_alvo = urls[0].rstrip('.,;:')
+        ativo = await asyncio.to_thread(_verificar_url_sincrono, url_alvo, timeout)
+
+        if ativo:
+            return recurso
+        return f"{recurso} ⚠️ *(Link possivelmente inativo ou inacessível)*"
+
+    tarefas = [processar_item(r) for r in recursos]
+    return await asyncio.gather(*tarefas)
+
+
+def validar_recursos_externos(recursos: List[str], ativar: bool = True) -> List[str]:
+    """Ponto de entrada síncrono para validar recursos de forma assíncrona em paralelo."""
+    if not recursos or not ativar:
+        return recursos
+    try:
+        return asyncio.run(_validar_lista_recursos_async(recursos))
+    except Exception:
+        # Em caso de falha inesperada no loop assíncrono, devolve os recursos originais sem quebrar o fluxo
+        return recursos
+
+
 class ObsidianVaultWriter:
-    def __init__(self, vault_path: str = config.DEFAULT_VAULT_PATH):
+    def __init__(self, vault_path: str = config.DEFAULT_VAULT_PATH, validar_links: bool = True):
         self.vault_path = Path(vault_path)
+        self.validar_links = validar_links
         self.pasta_videos = self.vault_path / config.PASTA_VIDEOS
         self.pasta_pessoas = self.vault_path / config.PASTA_PESSOAS
         self.pasta_livros = self.vault_path / config.PASTA_LIVROS
@@ -449,8 +510,11 @@ organizacoes: {organizacoes_links}
                 nota += f"- **[[{limpar_nome_ficheiro(a.nome)}]]** (`{a.subtipo}`){fabricante}{desc}\n"
 
         if analise.recursos_e_links:
+            if self.validar_links:
+                print("    🌐 A verificar disponibilidade dos links externos...")
+            recursos_verificados = validar_recursos_externos(analise.recursos_e_links, ativar=self.validar_links)
             nota += "\n---\n\n## 🔗 Links & Recursos Mencionados\n"
-            for recurso in analise.recursos_e_links:
+            for recurso in recursos_verificados:
                 nota += f"- {recurso}\n"
 
         if analise.capitulos:
@@ -628,8 +692,9 @@ organizacoes: {organizacoes_links}
                 nota += f"- [[{limpar_nome_ficheiro(o)}]]\n"
 
         if analise.recursos_e_links:
+            recursos_verificados = validar_recursos_externos(analise.recursos_e_links, ativar=self.validar_links)
             nota += "\n---\n\n## 🔗 Recursos & Links\n"
-            for r in analise.recursos_e_links:
+            for r in recursos_verificados:
                 nota += f"- {r}\n"
 
         if analise.temas:
