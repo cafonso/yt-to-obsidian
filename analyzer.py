@@ -98,6 +98,8 @@ class VideoAnalyzer:
         self.fallback_model = FALLBACK_MODEL
         # Usamos v1beta para suporte completo a JSON schema com Pydantic
         self.client = genai.Client(http_options={'api_version': 'v1beta'})
+        # Timeout de 180 segundos (180000 ms) para evitar bloqueios infinitos
+        self.client = genai.Client(http_options={'api_version': 'v1beta', 'timeout': 180000})
 
     def _chamar_gemini_com_retry(self, modelo: str, conteudos: list, config_obj: types.GenerateContentConfig, max_tentativas: int = None):
         if max_tentativas is None:
@@ -105,6 +107,7 @@ class VideoAnalyzer:
 
         for tentativa in range(1, max_tentativas + 1):
             try:
+                print(f"    📡 A aguardar resposta do Gemini ({modelo}) [tentativa {tentativa}/{max_tentativas}]...", flush=True)
                 return self.client.models.generate_content(
                     model=modelo,
                     contents=conteudos,
@@ -117,14 +120,17 @@ class VideoAnalyzer:
                     or "UNAVAILABLE" in erro_str
                     or "429" in erro_str
                     or "RESOURCE_EXHAUSTED" in erro_str
+                    or "timeout" in erro_str.lower()
+                    or "timed out" in erro_str.lower()
                 )
                 if not transitorio or tentativa >= max_tentativas:
                     raise e
 
                 espera = _calcular_espera(tentativa, erro_str)
                 print(
-                    f"    ⚠️ Erro transitório ({'429' if '429' in erro_str else '503'}). "
-                    f"A aguardar {espera:.1f}s antes da tentativa {tentativa + 1}/{max_tentativas}..."
+                    f"    ⚠️ Erro/Timeout ({erro_str[:60]}...). "
+                    f"A aguardar {espera:.1f}s antes da tentativa {tentativa + 1}/{max_tentativas}...",
+                    flush=True
                 )
                 time.sleep(espera)
                 

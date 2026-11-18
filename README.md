@@ -1,44 +1,58 @@
 # 🧠 YouTube to Obsidian Knowledge Graph
 
-Ferramenta automatizada de PKM (Personal Knowledge Management) para transformar vídeos do YouTube num grafo de conhecimento atómico, denso e bidirecional no **Obsidian**, potenciado pelo **Google Gemini 2.5 Flash**.
+Ferramenta automatizada de PKM (Personal Knowledge Management) para transformar vídeos do YouTube num grafo de conhecimento atómico, denso e bidirecional no **Obsidian**, potenciado pelo **Google Gemini 3.5 Flash**.
 
 ---
 
-## 🌟 O que a Ferramenta Extrai Sistematicamente
+🧠 YouTube to Obsidian Knowledge Graph
 
-Para cada vídeo processado, é criada uma página estruturada em `Videos/` com:
-1. **📝 Resumo Executivo:** Síntese densa e clara em português (PT-PT).
-2. **💡 Principais Takeaways:** Os 3 a 7 ensinamentos mais valiosos.
-3. **📊 Métricas & Números Chave:** Percentagens, ganhos de eficiência, dados financeiros, benchmarks e custos de compute.
-4. **⚠️ Tensões, Riscos & Mitos Desmontados:** Contraditório, limites técnicos dos modelos e mitos desmistificados.
-5. **📅 Agenda & Previsões Futuras:** Datas de lançamento anunciadas, conferências, janelas de IPOs ou cronogramas.
-6. **👤 Pessoas Mencionadas:** Apenas figuras com **Nome Completo** deduzido (ex: `Sarah Friar`, `Satya Nadella`), criando notas biográficas dedicadas.
-7. **📚 Livros, Artigos & Papers:** Título oficial na língua original (sem tradução artificial) conectado diretamente com `[[link]]` ao(s) respetivo(s) autor(es).
-8. **🏢 Organizações & Entidades:** Laboratórios, empresas e instituições chave.
-9. **🔗 Links & Recursos Mencionados:** URLs de papers (Arxiv), repositórios GitHub, blogs e ferramentas citadas.
-10. **⏱️ Capítulos / Timestamps:** Linha temporal navegável.
-11. **🏷️ Temas Abordados:** Terminologia técnica internacional (ex: `Agentic Context (Contexto Agêntico)`).
-12. **Artefactos:** Modelos, ferramentas 
+Ferramenta automatizada de PKM (Personal Knowledge Management) para transformar vídeos e conferências do YouTube num grafo de conhecimento atómico, denso e bidirecional no Obsidian, potenciado pelo Google Gemini.
 
----
+🌟 O que a Ferramenta Extrai Sistematicamente
 
-## 📅 Integração com o Diário (`YYYY-MM-DD.md`)
+Para cada vídeo ou palestra processada, é criada uma página estruturada em Videos/ com:
 
-* O script regista a entrada no diário na **data de visualização** (data de hoje por defeito, ou a data indicada na lista com cabeçalho `# YYYY-MM-DD`), mantendo no metadado do vídeo a data original de publicação.
-* **Preservação Total:** Nunca apaga o que já escreveste manualmente no diário.
-* Injeta de forma cirúrgica uma secção:
-  ```markdown
-  ## 📹 Vídeos Analisados & Resumos
-  - [[2026-11-07 - What Is Agentic Context Hermes, Honcho Memory & Obsidian LLM Wiki]] — *Wanderloots*
-  ```
+📝 Resumo Executivo: Síntese densa e clara em português (PT-PT).
 
----
+💡 Principais Takeaways: Os 3 a 7 ensinamentos mais valiosos.
 
-## 🚀 Como Usar no Dia a Dia
+📊 Métricas & Números Chave: Percentagens, ganhos de eficiência, dados financeiros, benchmarks e custos de compute.
 
-A partir desta pasta (`d:\discoj\code\py\yt`):
+⚠️ Tensões, Riscos & Mitos Desmontados: Contraditório, limites técnicos dos modelos e mitos desmistificados.
 
-```bash
+📅 Agenda & Previsões Futuras: Datas de lançamento anunciadas, conferências, janelas de IPOs ou cronogramas.
+
+👤 Pessoas Mencionadas: Apenas figuras com Nome Completo deduzido (ex: Sarah Friar, Satya Nadella), criando notas biográficas dedicadas.
+
+📚 Livros, Artigos & Papers: Título oficial na língua original conectado diretamente com [[link]] ao(s) respetivo(s) autor(es).
+
+🏢 Organizações & Entidades: Laboratórios, empresas e instituições chave.
+
+🔗 Links & Recursos Mencionados: URLs de papers (Arxiv), repositórios GitHub, blogs e ferramentas citadas.
+
+⏱️ Capítulos / Timestamps: Linha temporal navegável.
+
+🏷️ Temas Abordados: Terminologia técnica internacional (ex: Agentic Context (Contexto Agêntico)).
+
+🧩 Artefactos: Modelos, frameworks, ferramentas, agentes, técnicas, hardware, plataformas e datasets (com fabricante associado).
+
+📦 Instalação & Gestão de Dependências
+
+O projeto utiliza pyproject.toml (padrão PEP 621) gerido nativamente pelo uv.
+
+Na raiz do projeto (d:\discoj\code\py\yt):
+
+# Sincronizar o ambiente virtual e instalar dependências principais e de desenvolvimento
+uv sync
+
+
+(Opcional) Caso precises de exportar um requirements.txt tradicional para compatibilidade:
+
+uv export --no-dev --no-hashes -o requirements.txt
+
+
+🚀 Como Usar no Dia a Dia
+
 # 1. Abrir o Menu Interativo
 uv run python main.py
 
@@ -51,30 +65,56 @@ uv run python main.py --lista lista_de_videos.txt
 # 4. Forçar reprocessamento de vídeos anteriores com as novas regras
 uv run python main.py --lista lista_de_videos.txt --forcar
 
-# 5. Se a lista tiver uma linha com data (# YYYY-MM-DD), essa será considerada a data da entrada no diário
-```
+# 5. Forçar modo conferência (dividir em notas por palestra) ou nota única
+uv run python main.py "https://www.youtube.com/watch?v=..." --split
+uv run python main.py "https://www.youtube.com/watch?v=..." --unico
 
----
 
-## 🛡️ Arquitetura Anti-Bloqueio do YouTube
+🧪 Executar Testes Automatizados
 
-Se o YouTube bloquear o teu IP no endpoint de legendas:
-* O sistema descarrega automaticamente o áudio leve (`.m4a` em 1 segundo) via `yt-dlp`.
-* Envia o áudio para o Gemini Flash, que **escuta diretamente o áudio** e faz a extração completa.
-* Remove o áudio temporário após o processamento.
+O projeto dispõe de uma suite de testes unitários e de integração (com simulação de cofres Obsidian temporários) na pasta tests/.
 
----
+Para executar toda a suite de testes:
 
-### Resumo do que foi atualizado face à versão anterior
+uv run pytest
 
-| Secção | Alteração |
-|---|---|
-| Lista de extração | Passou de 11 para 12 pontos; **Artefactos** e **Organizações** ganharam destaque. |
-| **Nova secção "Artefactos — 8 Subtipos"** | Tabela com os 8 subtipos e exemplos; distinção `ferramenta` vs `agente`; heurística de fabricante. |
-| Diário | Corrigido: usa **data de leitura**, não data de publicação; bloco real injetado (antes de `# Resenha do dia`). |
-| Como usar | Menciona suporte a cabeçalhos `# YYYY-MM-DD` no `lista_de_videos.txt`. |
-| Anti-bloqueio | Atualizado: cascata pt/en/es → fallback legendas automáticas; `cookies.txt` opcional. |
-| **Nova secção "Estrutura de Ficheiros"** | Árvore do projeto; nota sobre `transcricao*.py` obsoletos. |
-| **Nova secção "Estrutura do Vault"** | Inclui `Artefactos/` e `Organizações/`. |
-| **Nova secção "Variáveis de Ambiente"** | Tabela com `OBSIDIAN_VAULT_PATH` e `GEMINI_MODEL`. |
-| **Nova secção "Limitações Conhecidas"** | Honestidade sobre falsos positivos e dependência de áudio. |
+
+📅 Integração com o Diário (YYYY-MM-DD.md)
+
+O script regista a entrada no diário na data de visualização (data de hoje por defeito, ou a data indicada na lista com cabeçalho # YYYY-MM-DD), mantendo no metadado do vídeo a data original de publicação.
+
+Preservação Total: Nunca apaga o que já escreveste manualmente no diário, injetando o bloco de metadados imediatamente antes de # Resenha do dia (ou no fim do ficheiro).
+
+🛡️ Arquitetura Anti-Bloqueio & Vídeos Longos
+
+Fallback de Áudio: Se o YouTube bloquear o endpoint de legendas, o sistema descarrega automaticamente o áudio leve (.m4a) via yt-dlp e envia-o diretamente para o Gemini Flash.
+
+Pipeline Map-Reduce & The Scout: Vídeos longos são segmentados automaticamente (ffmpeg para áudio ou fatiamento temporal para texto). Caso o vídeo seja uma conferência com múltiplos oradores, o módulo The Scout mapeia a agenda e gera notas atómicas por palestra ligadas a um Índice MOC.
+
+📁 Estrutura do Projeto & do Vault
+
+Repositório
+
+├── analyzer.py          # Comunicação com Gemini, retries/backoff, Map-Reduce e Scout
+├── canonicalizer.py     # Resolução determinística e fuzzy match de entidades
+├── config.py            # Configurações centralizadas e thresholds
+├── extractor.py         # Extração de metadados, legendas e fatiamento via yt-dlp/ffmpeg
+├── main.py              # CLI e menu interativo
+├── models.py            # Esquemas Pydantic para Structured Outputs
+├── utils.py             # Validadores de nomes de pessoas e organizações
+├── vault_writer.py      # Escrita estruturada de notas e diários no Obsidian
+├── pyproject.toml       # Configuração do projeto, dependências e pytest
+└── tests/               # Testes unitários e de integração
+    ├── test_pkm.py
+    └── test_vault_writer.py
+
+
+Cofre Obsidian
+
+Videos/ (e subpastas por conferência com respetivo MOC)
+
+Pessoas/, Organizações/, Livros/, Temas/, Artefactos/
+
+.canonicalizacao/ (aliases.yaml, decisoes.jsonl, revisao.md)
+
+YYYY-MM-DD.md (Notas diárias)
