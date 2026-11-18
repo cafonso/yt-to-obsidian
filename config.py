@@ -21,6 +21,8 @@ SUBTIPOS_ARTEFACTO = {
 # Modelo Gemini predefinido
 MODELO_GEMINI = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
 FALLBACK_MODEL = "gemini-3.5-flash-lite"  # ajusta se confirmares outro nome válido
+MODELO_SCOUT = "gemini-3.5-flash-lite"   # Rápido e barato para triagem e extração de entidades
+MODELO_ANALISE = "gemini-2.5-flash"      # Mais capaz para o resumo detalhado do Obsidian
 
 # Parâmetros para processamento de vídeos longos (fatiamento Map-Reduce)
 LIMIAR_VIDEO_LONGO_SEGUNDOS = int(os.environ.get("LIMIAR_VIDEO_LONGO", 45 * 60))  # 45 minutos
