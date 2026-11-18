@@ -11,6 +11,41 @@ import random
 import re
 from config import FALLBACK_MODEL
 
+
+INSTRUCOES_EXTRACAO_COMUNS = """
+INSTRUÇÕES ESPECÍFICAS DE EXTRAÇÃO:
+0. REGRA ESTRITA DE IDIOMAS E TÍTULOS (MUITO IMPORTANTE):
+   - TÍTULOS DE VÍDEOS: Mantém SEMPRE o título na sua língua original (geralmente em inglês). NUNCA traduzas o título do vídeo para português! Apenas remove emojis excessivos ou CAPS LOCK de clickbait.
+   - TÍTULOS DE OBRAS (Livros, Artigos, Papers): Mantém SEMPRE o título original oficial na língua de publicação. NUNCA traduzas títulos de livros ou papers!
+   - NOMES DE ARTEFACTOS: Mantém SEMPRE o nome oficial (ex: 'GPT-4o', 'Claude 3.5 Sonnet', 'H100 SXM5', 'LoRA'). NUNCA traduzas nem abras nomes de modelos/ferramentas.
+   - TEMAS: Usa a terminologia técnica padrão original (geralmente em inglês). Se quiseres incluir a tradução portuguesa, coloca-a OBRIGATORIAMENTE entre parênteses. NUNCA uses termos isolados em português do Brasil.
+   - SÍNTESE: O resumo executivo, takeaways e bios devem ser redigidos em português claro, formal e correto (PT-PT).
+
+1. Resumo Executivo / Síntese: Sintetiza em português os tópicos e conclusões essenciais (2 a 3 parágrafos ou resumo coeso do segmento).
+2. Takeaways Principais: Lista de pontos-chave práticos e de alto valor.
+3. Métricas, Números & Dados Quantitativos: Extrai todos os dados concretos citados (ex: percentagens de ganho de eficiência, benchmarks, números financeiros como receitas/burn, contagens de tokens, custos por tarefa, multiplicadores).
+4. Tensões, Riscos & Mitos Desmontados: Identifica os pontos de atrito, mitos desmistificados pelos oradores, limitações técnicas dos modelos, riscos de infraestrutura ou pontos de ceticismo qualificado.
+5. Agenda & Previsões Futuras: Datas de lançamentos, IPOs, conferências, janelas de publicação ou cronogramas esperados para as próximas semanas/meses.
+6. Links, Papers & Recursos Externos: Lista de URLs reais, referências a papers no Arxiv, links no GitHub, posts de blog ou documentação relevante mencionada.
+7. Capítulos / Timestamps / Marcos: Lista dos principais marcos temporais ou títulos de secção relevantes.
+8. Temas: Conceitos centrais na terminologia técnica original (com tradução opcional entre parênteses).
+9. Pessoas (REGRA DO NOME COMPLETO):
+   - Extrai APENAS figuras públicas, cientistas, autores, oradores ou executivos de relevância real com o seu NOME COMPLETO CANÓNICO.
+   - NUNCA uses apenas o primeiro nome próprio solto (ex: NUNCA 'Sarah', 'Dom', 'Tim', 'Koen', 'Damien', 'Zach').
+   - NÃO coloques empresas ou organizações neste campo — vai para o campo 11.
+10. Livros, Artigos e Papers Citados: Obras citadas no título original com o(s) respetivo(s) autor(es).
+11. Organizações: Empresas, universidades, laboratórios ou instituições chave referidas (ex: 'OpenAI', 'Google DeepMind', 'NVIDIA', 'Anthropic', 'MIT', 'Hugging Face'). Usa o nome oficial e completo da organização.
+12. Artefactos (Modelos, Frameworks, Ferramentas, Agentes, Técnicas, Hardware, Plataformas, Dataset):
+   - Extrai TODOS os artefactos técnicos mencionados com o nome oficial.
+   - Classifica cada um num dos 8 subtipos: 'modelo', 'framework', 'ferramenta', 'agente', 'tecnica', 'hardware', 'plataforma', 'dataset'.
+   - Indica o fabricante/autor quando conhecido. Deixa null se desconhecido.
+   - Para cada artefacto, escreve 1-2 frases em português sobre o seu papel/relevância NO CONTEXTO específico.
+
+Responde estritamente de acordo com o esquema JSON fornecido.
+"""
+
+
+
 def _extrair_retry_after(erro_str: str) -> Optional[float]:
     """
     Tenta extrair um valor de Retry-After (segundos) da mensagem de erro.
@@ -286,45 +321,8 @@ CONTEXTO GLOBAL DO VÍDEO:
 
 {fonte_bloco}
 
-INSTRUÇÕES DE EXTRAÇÃO PARA ESTE BLOCO:
-... (mantém as instruções 0 a 12 exatamente iguais) ...
+{INSTRUCOES_EXTRACAO_COMUNS}
 """
-        config_obj = types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=SegmentoAnalise,
-            temperature=0.2,
-        )
-
-        arquivo_google = None
-        conteudos = [prompt]
-
-        try:
-            if caminho_audio_chunk and os.path.exists(caminho_audio_chunk):
-                arquivo_google = self.client.files.upload(file=caminho_audio_chunk)
-                conteudos.append(arquivo_google)
-
-            try:
-                resp = self._chamar_gemini_com_retry(self.model_name, conteudos, config_obj)
-            except Exception:
-                if self.fallback_model and self.fallback_model != self.model_name:
-                    resp = self._chamar_gemini_com_retry(self.fallback_model, conteudos, config_obj)
-                else:
-                    raise
-
-            if not resp or not resp.parsed:
-                raise ValueError(f"Falha ao analisar o bloco {idx}/{total}.")
-            return resp.parsed
-        finally:
-            if arquivo_google:
-                try:
-                    self.client.files.delete(name=arquivo_google.name)
-                except Exception:
-                    pass
-					
-					
-					
-					
-				
 
     def _consolidar_segmentos(self, dados_video: Dict[str, Any], segmentos_analisados: List[SegmentoAnalise]) -> AnaliseVideo:
         """Funde as entidades recolhidas em todos os blocos e gera o resumo executivo global (Reduce)."""
@@ -490,40 +488,13 @@ METADADOS DO VÍDEO:
 DESCRIÇÃO ORIGINAL DO VÍDEO (RECURSOS, LINKS E TIMESTAMPS):
 {dados_video.get('descricao', '')}
 """
+        # O fallback/condicional que garante que o texto da transcrição é incluído se existir
         if transcricao:
             prompt += f"\nTRANSCRIÇÃO COMPLETA:\n{transcricao}\n"
+        
+        # Injeção das regras comuns unificadas
+        prompt += f"\n{INSTRUCOES_EXTRACAO_COMUNS}"
 
-        prompt += """
-INSTRUÇÕES ESPECÍFICAS DE EXTRAÇÃO:
-0. REGRA ESTRITA DE IDIOMAS E TÍTULOS (MUITO IMPORTANTE):
-   - TÍTULOS DE VÍDEOS: Mantém SEMPRE o título na sua língua original (geralmente em inglês). NUNCA traduzas o título do vídeo para português! Apenas remove emojis excessivos ou CAPS LOCK de clickbait.
-   - TÍTULOS DE OBRAS (Livros, Artigos, Papers): Mantém SEMPRE o título original oficial na língua de publicação. NUNCA traduzas títulos de livros ou papers!
-   - NOMES DE ARTEFACTOS: Mantém SEMPRE o nome oficial (ex: 'GPT-4o', 'Claude 3.5 Sonnet', 'H100 SXM5', 'LoRA'). NUNCA traduzas nem abras nomes de modelos/ferramentas.
-   - TEMAS: Usa a terminologia técnica padrão original (geralmente em inglês). Se quiseres incluir a tradução portuguesa, coloca-a OBRIGATORIAMENTE entre parênteses. NUNCA uses termos isolados em português do Brasil.
-   - SÍNTESE: O resumo executivo, takeaways e bios devem ser redigidos em português claro, formal e correto (PT-PT).
-
-1. Resumo Executivo: Sintetiza em português os tópicos e conclusões essenciais (2 a 3 parágrafos).
-2. Takeaways Principais: Lista de 3 a 7 pontos-chave práticos e de alto valor.
-3. Métricas, Números & Dados Quantitativos: Extrai todos os dados concretos citados (ex: percentagens de ganho de eficiência, benchmarks, números financeiros como receitas/burn, contagens de tokens, custos por tarefa, multiplicadores).
-4. Tensões, Riscos & Mitos Desmontados: Identifica os pontos de atrito, mitos desmistificados pelos oradores, limitações técnicas dos modelos, riscos de infraestrutura ou pontos de ceticismo qualificado.
-5. Agenda & Previsões Futuras: Datas de lançamentos, IPOs, conferências, janelas de publicação ou cronogramas esperados para as próximas semanas/meses.
-6. Links, Papers & Recursos Externos: Lista de URLs reais, referências a papers no Arxiv, links no GitHub, posts de blog ou documentação relevante mencionada no vídeo ou na descrição.
-7. Capítulos / Timestamps: Lista dos principais capítulos/marcos temporais do vídeo (ex: "00:00 Intro", "03:20 Reading Anthropic S-1"), se presentes na descrição ou transcrição.
-8. Temas: 3 a 8 conceitos centrais na terminologia técnica original (com tradução opcional entre parênteses).
-9. Pessoas (REGRA DO NOME COMPLETO):
-   - Extrai APENAS figuras públicas, cientistas, autores, oradores ou executivos de relevância real com o seu NOME COMPLETO CANÓNICO.
-   - NUNCA uses apenas o primeiro nome próprio solto (ex: NUNCA 'Sarah', 'Dom', 'Tim', 'Koen', 'Damien', 'Zach').
-   - NÃO coloques empresas ou organizações neste campo — vai para o campo 11.
-10. Livros, Artigos e Papers Citados: Obras citadas no título original com o(s) respetivo(s) autor(es).
-11. Organizações: Empresas, universidades, laboratórios ou instituições chave referidas (ex: 'OpenAI', 'Google DeepMind', 'NVIDIA', 'Anthropic', 'MIT', 'Hugging Face'). Usa o nome oficial e completo da organização.
-12. Artefactos (Modelos, Frameworks, Ferramentas, Agentes, Técnicas, Hardware, Plataformas, Datasets):
-   - Extrai TODOS os artefactos técnicos mencionados com o nome oficial.
-   - Classifica cada um num dos 8 subtipos: 'modelo', 'framework', 'ferramenta', 'agente', 'tecnica', 'hardware', 'plataforma', 'dataset'.
-   - Indica o fabricante/autor quando conhecido. Deixa null se desconhecido.
-   - Para cada artefacto, escreve 1-2 frases em português sobre o seu papel/relevância NO CONTEXTO específico do vídeo.
-
-Responde estritamente de acordo com o esquema JSON fornecido.
-"""
         config_obj = types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=AnaliseVideo,
@@ -563,9 +534,7 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         if not response or not response.parsed:
             raise ValueError("O Gemini não devolveu um resultado estruturado válido.")
 
-        # ------------------------------------------------------------------
-        # Canonicalização de entidades (passo único também beneficia)
-        # ------------------------------------------------------------------
+        # Canonicalização de entidades
         analise: AnaliseVideo = response.parsed
         canon = _criar_canonicalizer()
 
