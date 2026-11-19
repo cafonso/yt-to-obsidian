@@ -2,13 +2,11 @@ import os
 import re
 import asyncio
 import datetime
-import urllib.request
-import urllib.error
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional
 from models import AnaliseVideo, ObraCitada, PessoaMencionada, ArtefactoIA, AgendaScout, SessaoScout, PalestraAnalise
 import config
-from utils import eh_nome_valido_pessoa, eh_organizacao
+from utils import eh_nome_valido_pessoa, eh_organizacao, verificar_link_ativo
 
 
 def limpar_nome_ficheiro(nome: str) -> str:
@@ -50,13 +48,13 @@ async def _validar_lista_recursos_async(recursos: List[str], timeout: float = 3.
         return []
 
     async def processar_item(recurso: str) -> str:
-        urls = re.findall(r'https?://[^\s\]\)]+', recurso)
+        urls = re.findall(r"https?://[^\s\]\)]+", recurso)
         if not urls:
             return recurso
 
-        # Limpa eventual pontuação final presa ao URL (ex: ponto final ou vírgula)
-        url_alvo = urls[0].rstrip('.,;:')
-        ativo = await asyncio.to_thread(_verificar_url_sincrono, url_alvo, timeout)
+        # Limpa eventual pontuação final presa ao URL (ex.: ponto final ou vírgula)
+        url_alvo = urls[0].rstrip(".,;:")
+        ativo = await asyncio.to_thread(verificar_link_ativo, url_alvo, timeout)
 
         if ativo:
             return recurso
@@ -64,7 +62,6 @@ async def _validar_lista_recursos_async(recursos: List[str], timeout: float = 3.
 
     tarefas = [processar_item(r) for r in recursos]
     return await asyncio.gather(*tarefas)
-
 
 def validar_recursos_externos(recursos: List[str], ativar: bool = True) -> List[str]:
     """Ponto de entrada síncrono para validar recursos de forma assíncrona em paralelo."""

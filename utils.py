@@ -1,63 +1,33 @@
-import concurrent.futures
 import re
 import urllib.request
 import urllib.error
 from typing import List, Optional
+import http.client
 
-def _validar_recurso_individual(recurso: str) -> str:
-    """Função auxiliar para validar um único recurso/link em thread separada."""
-    urls = re.findall(r'https?://[^\s\]\)]+', recurso)
-    if urls:
-        url_alvo = urls[0]
-        if verificar_link_ativo(url_alvo):
-            return recurso
-        else:
-            return f"{recurso} ⚠️ *(Link possivelmente inativo)*"
-    else:
-        return recurso
 
-def filtrar_recursos_ativos(recursos: List[str]) -> List[str]:
-    """
-    Filtra uma lista de recursos/links de forma concorrente usando threads,
-    mantendo apenas aqueles que respondem ativamente.
-    """
-    if not recursos:
-        return []
 
-    # Executa as validações em paralelo (máximo de 10 threads simultâneas)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        return list(executor.map(_validar_recurso_individual, recursos))
-
-def verificar_link_ativo(url: str, timeout: float = 3.0) -> bool:
-    """
-    Verifica de forma leve e rápida se um URL está ativo (retorna código HTTP de sucesso ou redirecionamento).
-    Usa um pedido HEAD para evitar descarregar o corpo da página.
-    """
+def verificar_link_ativo(url: str, timeout: float = 3.5) -> bool:
+    """Verifica de forma leve se um URL responde com sucesso (200-399)."""
     if not url or not url.startswith(("http://", "https://")):
         return False
 
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "Mozilla/5.0 (Compatible; ObsidianPKMBot/1.0)"},
-        method="HEAD"
-    )
-    
+    headers = {"User-Agent": "Mozilla/5.0 (Compatible; ObsidianPKMBot/1.0)"}
+
+    # 1. Tenta pedido HEAD (mais rápido, sem descarregar o corpo)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            return 200 <= response.status < 400
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, Exception):
-        # Em caso de erro num pedido HEAD, tenta um GET rápido (alguns servidores rejeitam HEAD)
-        try:
-            req_get = urllib.request.Request(
-                url,
-                headers={"User-Agent": "Mozilla/5.0 (Compatible; ObsidianPKMBot/1.0)"},
-                method="GET"
-            )
-            # Lê apenas os primeiros bytes ou usa timeout curto
-            with urllib.request.urlopen(req_get, timeout=timeout) as response:
-                return 200 <= response.status < 400
-        except Exception:
-            return False
+        req_head = urllib.request.Request(url, headers=headers, method="HEAD")
+        with urllib.request.urlopen(req_head, timeout=timeout) as resp:
+            return 200 <= resp.status < 400
+    except (OSError, http.client.HTTPException):
+        pass
+
+    # 2. Fallback para GET leve (alguns servidores bloqueiam HEAD)
+    try:
+        req_get = urllib.request.Request(url, headers=headers, method="GET")
+        with urllib.request.urlopen(req_get, timeout=timeout) as resp:
+            return 200 <= resp.status < 400
+    except (OSError, http.client.HTTPException):
+        return False
 
 PALAVRAS_ORGANIZACAO = {
     "inc", "corp", "corporation", "labs", "lab", "university", "universidade",
