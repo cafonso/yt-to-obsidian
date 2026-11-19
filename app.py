@@ -7,7 +7,6 @@ import streamlit as st
 
 import config
 from extrator import YouTubeExtractor, extrair_id_youtube
-import extrator
 from analyzer import VideoAnalyzer
 from vault_writer import ObsidianVaultWriter
 from main import processar_um_video, carregar_historico
@@ -105,21 +104,22 @@ with tab_processar:
         height=140,
         placeholder="https://www.youtube.com/watch?v=...\nhttps://youtu.be/...",
     )
-
-    col_btn, col_info = st.columns([1, 3])
+  
+    col_btn, _ = st.columns([1, 3])
     with col_btn:
         iniciar = st.button("🚀 Iniciar Extração", type="primary", use_container_width=True)
 
     if iniciar:
-        linhas_raw = [l.strip() for l in urls_texto.splitlines() if l.strip() and not l.strip().startswith("#")]
         linhas_raw = []
         for l in urls_texto.splitlines():
-             l_limpa = l.strip()
-             if l_limpa and not l_limpa.startswith("#"):
-                # Divide por espaços e pega apenas no primeiro item (o URL limpo), 
+            l_limpa = l.strip()
+            if l_limpa and not l_limpa.startswith("#"):
+                # Divide por espaços e pega apenas no primeiro item (o URL limpo),
                 # ignorando flags coladas à frente como --forcar ou --unico
                 url_puro = l_limpa.split()[0]
                 linhas_raw.append(url_puro)
+
+# ----    
         if not linhas_raw:
             st.warning("Introduza pelo menos um URL do YouTube válido.")
         else:
