@@ -1,8 +1,32 @@
+import concurrent.futures
 import re
-
 import urllib.request
 import urllib.error
 from typing import List, Optional
+
+def _validar_recurso_individual(recurso: str) -> str:
+    """Função auxiliar para validar um único recurso/link em thread separada."""
+    urls = re.findall(r'https?://[^\s\]\)]+', recurso)
+    if urls:
+        url_alvo = urls[0]
+        if verificar_link_ativo(url_alvo):
+            return recurso
+        else:
+            return f"{recurso} ⚠️ *(Link possivelmente inativo)*"
+    else:
+        return recurso
+
+def filtrar_recursos_ativos(recursos: List[str]) -> List[str]:
+    """
+    Filtra uma lista de recursos/links de forma concorrente usando threads,
+    mantendo apenas aqueles que respondem ativamente.
+    """
+    if not recursos:
+        return []
+
+    # Executa as validações em paralelo (máximo de 10 threads simultâneas)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        return list(executor.map(_validar_recurso_individual, recursos))
 
 def verificar_link_ativo(url: str, timeout: float = 3.0) -> bool:
     """
@@ -34,29 +58,6 @@ def verificar_link_ativo(url: str, timeout: float = 3.0) -> bool:
                 return 200 <= response.status < 400
         except Exception:
             return False
-
-def filtrar_recursos_ativos(recursos: List[str]) -> List[str]:
-    """
-    Filtra uma lista de recursos/links, mantendo apenas aqueles que respondem ativamente.
-    Adiciona um comentário subtil ou remove os que falharem, ou preserva-os com um aviso.
-    """
-    recursos_validados = []
-    for recurso in recursos:
-        # Extrai URLs se o formato incluir Markdown do tipo [Texto](URL) ou texto livre
-        import re
-        urls = re.findall(r'https?://[^\s\]\)]+', recurso)
-        
-        if urls:
-            url_alvo = urls[0]
-            if verificar_link_ativo(url_alvo):
-                recursos_validados.append(recurso)
-            else:
-                # Opcional: Mantém o recurso mas sinaliza que pode estar inativo
-                recursos_validados.append(f"{recurso} ⚠️ *(Link possivelmente inativo)*")
-        else:
-            recursos_validados.append(recurso)
-            
-    return recursos_validados
 
 PALAVRAS_ORGANIZACAO = {
     "inc", "corp", "corporation", "labs", "lab", "university", "universidade",
