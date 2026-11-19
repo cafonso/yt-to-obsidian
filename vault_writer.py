@@ -18,28 +18,7 @@ def limpar_nome_ficheiro(nome: str) -> str:
     return nome_limpo[:120]
 
 
-def _verificar_url_sincrono(url: str, timeout: float = 3.5) -> bool:
-    """Verifica de forma leve se um URL responde com sucesso (200-399)."""
-    if not url or not url.startswith(("http://", "https://")):
-        return False
 
-    headers = {"User-Agent": "Mozilla/5.0 (Compatible; ObsidianPKMBot/1.0)"}
-
-    # 1. Tenta pedido HEAD (mais rápido, sem descarregar conteúdo)
-    try:
-        req_head = urllib.request.Request(url, headers=headers, method="HEAD")
-        with urllib.request.urlopen(req_head, timeout=timeout) as resp:
-            return 200 <= resp.status < 400
-    except Exception:
-        pass
-
-    # 2. Fallback para GET leve (alguns servidores bloqueiam HEAD)
-    try:
-        req_get = urllib.request.Request(url, headers=headers, method="GET")
-        with urllib.request.urlopen(req_get, timeout=timeout) as resp:
-            return 200 <= resp.status < 400
-    except Exception:
-        return False
 
 
 async def _validar_lista_recursos_async(recursos: List[str], timeout: float = 3.5) -> List[str]:

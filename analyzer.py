@@ -95,20 +95,28 @@ def _calcular_espera(tentativa: int, erro_str: str) -> float:
     return espera
 
 
+def _chave_frase(s: str) -> str:
+    s = unicodedata.normalize("NFKC", s).lower().strip()
+    s = re.sub(r"\s+", " ", s)
+    s = re.sub(r"[.,;:!?]+$", "", s).strip()
+    return s
+
+
 def desduplicar_strings(lista: List[str]) -> List[str]:
     """Deduplicação simples para textos livres (métricas, tensões, agenda, recursos).
     Não usar para entidades — essas passam pelo Canonicalizer."""
-    vistos = set()
-    resultado = []
+    vistos: set[str] = set()
+    resultado: List[str] = []
     for item in lista:
         if not item or not item.strip():
             continue
         item_limpo = item.strip()
-        chave = item_limpo.lower()
-        if chave not in vistos:
+        chave = _chave_frase(item_limpo)
+        if chave and chave not in vistos:
             vistos.add(chave)
             resultado.append(item_limpo)
     return resultado
+
 
 
 def _criar_canonicalizer() -> Canonicalizer:
