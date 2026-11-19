@@ -45,14 +45,12 @@ Responde estritamente de acordo com o esquema JSON fornecido.
 """
 
 
-
 def _extrair_retry_after(erro_str: str) -> Optional[float]:
     """
     Tenta extrair um valor de Retry-After (segundos) da mensagem de erro.
     O SDK do google-genai às vezes inclui o header na string de exceção.
     Devolve None se não encontrar.
     """
-    # Formatos comuns: "retry_after: 30", "Retry-After: 30", "retryDelay: 30s"
     m = re.search(r'retry[_\- ]?after\s*[:=]\s*"?(\d+(?:\.\d+)?)\s*s?"?', erro_str, re.IGNORECASE)
     if m:
         try:
@@ -85,18 +83,17 @@ def _calcular_espera(tentativa: int, erro_str: str) -> float:
     espera = base * (2 ** (tentativa - 1))
     espera = min(espera, config.GEMINI_BACKOFF_TETO_SEGUNDOS)
 
-    # Jitter multiplicativo (±20% por defeito)
     if config.GEMINI_BACKOFF_JITTER > 0:
         fator = 1.0 + random.uniform(-config.GEMINI_BACKOFF_JITTER, config.GEMINI_BACKOFF_JITTER)
         espera = max(1.0, espera * fator)
 
-    # Retry-After explícito do servidor tem prioridade (mas respeita o teto)
     if config.GEMINI_RESPEITAR_RETRY_AFTER:
         ra = _extrair_retry_after(erro_str)
         if ra is not None:
             espera = min(ra, config.GEMINI_BACKOFF_TETO_SEGUNDOS)
 
     return espera
+
 
 def desduplicar_strings(lista: List[str]) -> List[str]:
     """Deduplicação simples para textos livres (métricas, tensões, agenda, recursos).
@@ -113,6 +110,7 @@ def desduplicar_strings(lista: List[str]) -> List[str]:
             resultado.append(item_limpo)
     return resultado
 
+
 def _criar_canonicalizer() -> Canonicalizer:
     """Instancia o Canonicalizer com todas as definições centralizadas no config.py."""
     return Canonicalizer(
@@ -126,12 +124,12 @@ def _criar_canonicalizer() -> Canonicalizer:
         escrever_revisao=config.CANON_ESCREVER_REVISAO,
         escrever_decisoes=config.CANON_ESCREVER_DECISOES,
     )
-    
+
+
 class VideoAnalyzer:
     def __init__(self, model_name: str = None):
         self.model_name = model_name or config.MODELO_GEMINI
         self.fallback_model = FALLBACK_MODEL
-        # Instancia o cliente com a versão v1beta e o timeout de 180 segundos de uma só vez
         self.client = genai.Client(http_options={'api_version': 'v1beta', 'timeout': 180000})
 
     def _chamar_gemini_com_retry(self, modelo: str, conteudos: list, config_obj: types.GenerateContentConfig, max_tentativas: int = None):
@@ -166,7 +164,16 @@ class VideoAnalyzer:
                     flush=True
                 )
                 time.sleep(espera)
-                
+
+    def _chamar_com_fallback(self, modelo: str, conteudos: list, config_obj: types.GenerateContentConfig):
+        """Chama o Gemini com retry no modelo indicado e faz fallback se este falhar."""
+        try:
+            return self._chamar_gemini_com_retry(modelo, conteudos, config_obj)
+        except Exception:
+            if self.fallback_model and self.fallback_model != modelo:
+                return self._chamar_gemini_com_retry(self.fallback_model, conteudos, config_obj)
+            raise
+
     def _preparar_contexto_scout(self, dados_video: Dict[str, Any]) -> str:
         """
         Prepara o material para o Scout:
@@ -180,19 +187,15 @@ class VideoAnalyzer:
                 f"- {formatar_tempo(c.get('start_time', 0))} a {formatar_tempo(c.get('end_time', 0))}: {c.get('title', '')}"
                 for c in capitulos
             ]
-            return "CAPÍTULOS DETETADOS NOS METADADOS DO YOUTUBE:
-" + "
-".join(linhas_cap)
+            return "CAPÍTULOS DETETADOS NOS METADADOS DO YOUTUBE:\n" + "\n".join(linhas_cap)
 
         blocos = dados_video.get("transcricao_blocos") or []
         if not blocos:
             transcricao = dados_video.get("transcricao")
             if not transcricao:
                 raise ValueError("Não há capítulos nem transcrição disponíveis para executar o Scout.")
-            return f"TRANSCRIÇÃO COMPLETA:
-{transcricao}"
+            return f"TRANSCRIÇÃO COMPLETA:\n{transcricao}"
 
-        # Agrupa blocos em janelas de ~30 segundos para eliminar timestamps redundantes
         linhas_compactadas = []
         buffer_texto = []
         ts_janela = None
@@ -210,10 +213,7 @@ class VideoAnalyzer:
         if buffer_texto and ts_janela is not None:
             linhas_compactadas.append(f"{formatar_tempo(ts_janela)} {' '.join(buffer_texto)}")
 
-        return "TRANSCRIÇÃO COMPACTADA (JANELAS DE 30s):
-" + "
-".join(linhas_compactadas)
-        
+        return "TRANSCRIÇÃO COMPACTADA (JANELAS DE 30s):\n" + "\n".join(linhas_compactadas)
 
     def _fatiar_transcricao(self, blocos: List[Dict[str, Any]], capitulos_originais: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
         """Divide a transcrição em segmentos temporais (~30 minutos) respeitando capítulos se existirem."""
@@ -221,7 +221,6 @@ class VideoAnalyzer:
         if not blocos:
             return []
 
-        # Se houver capítulos oficiais estruturados, agrupa-os em fatias equilibradas
         if capitulos_originais and len(capitulos_originais) > 1:
             segmentos = []
             chunk_caps = []
@@ -239,8 +238,7 @@ class VideoAnalyzer:
                     fim_s = chunk_caps[-1]["end_time"]
                     blocos_fatia = [b for b in blocos if inicio_s <= b['start'] < fim_s]
                     if blocos_fatia:
-                        texto = "
-".join([f"{formatar_tempo(b['start'])} {b['text']}" for b in blocos_fatia])
+                        texto = "\n".join([f"{formatar_tempo(b['start'])} {b['text']}" for b in blocos_fatia])
                         titulos_caps = " / ".join([c.get("title", "") for c in chunk_caps if c.get("title")])
                         segmentos.append({
                             "ts_inicio": formatar_tempo(inicio_s),
@@ -256,8 +254,7 @@ class VideoAnalyzer:
                 fim_s = chunk_caps[-1].get("end_time") or blocos[-1]['start']
                 blocos_fatia = [b for b in blocos if inicio_s <= b['start']]
                 if blocos_fatia:
-                    texto = "
-".join([f"{formatar_tempo(b['start'])} {b['text']}" for b in blocos_fatia])
+                    texto = "\n".join([f"{formatar_tempo(b['start'])} {b['text']}" for b in blocos_fatia])
                     titulos_caps = " / ".join([c.get("title", "") for c in chunk_caps if c.get("title")])
                     segmentos.append({
                         "ts_inicio": formatar_tempo(inicio_s),
@@ -268,7 +265,6 @@ class VideoAnalyzer:
             if segmentos:
                 return segmentos
 
-        # Fatiamento temporal direto contínuo (~30 minutos por fatia)
         segmentos = []
         chunk_atual = []
         tempo_inicio_chunk = blocos[0]['start']
@@ -279,8 +275,7 @@ class VideoAnalyzer:
 
             if tempo_decorrido >= duracao_chunk:
                 tempo_fim_chunk = b['start'] + b.get('duration', 0)
-                texto_formatado = "
-".join([f"{formatar_tempo(x['start'])} {x['text']}" for x in chunk_atual])
+                texto_formatado = "\n".join([f"{formatar_tempo(x['start'])} {x['text']}" for x in chunk_atual])
                 segmentos.append({
                     "ts_inicio": formatar_tempo(tempo_inicio_chunk),
                     "ts_fim": formatar_tempo(tempo_fim_chunk),
@@ -292,8 +287,7 @@ class VideoAnalyzer:
 
         if chunk_atual:
             tempo_fim_chunk = chunk_atual[-1]['start'] + chunk_atual[-1].get('duration', 0)
-            texto_formatado = "
-".join([f"{formatar_tempo(x['start'])} {x['text']}" for x in chunk_atual])
+            texto_formatado = "\n".join([f"{formatar_tempo(x['start'])} {x['text']}" for x in chunk_atual])
             segmentos.append({
                 "ts_inicio": formatar_tempo(tempo_inicio_chunk),
                 "ts_fim": formatar_tempo(tempo_fim_chunk),
@@ -302,19 +296,17 @@ class VideoAnalyzer:
             })
 
         return segmentos
-    
+
     def _analisar_segmento(self, dados_video: Dict[str, Any], segmento: Dict[str, Any], idx: int, total: int) -> SegmentoAnalise:
         """Executa a extração estruturada de um segmento específico (texto ou áudio) de vídeo longo."""
         ts_inicio = segmento["ts_inicio"]
         ts_fim = segmento["ts_fim"]
         texto_segmento = segmento.get("texto")
         caminho_audio_chunk = segmento.get("caminho_audio_chunk")
-        dica_titulo = f"
-- Tema/Capítulo sugerido nos metadados: {segmento['titulo_sugerido']}" if segmento.get('titulo_sugerido') else ""
+        dica_titulo = f"\n- Tema/Capítulo sugerido nos metadados: {segmento['titulo_sugerido']}" if segmento.get('titulo_sugerido') else ""
 
         fonte_bloco = (
-            f"TRANSCRIÇÃO DESTE BLOCO ({ts_inicio} a {ts_fim}):
-{texto_segmento}"
+            f"TRANSCRIÇÃO DESTE BLOCO ({ts_inicio} a {ts_fim}):\n{texto_segmento}"
             if texto_segmento
             else f"FONTE: Ouve atentamente o ficheiro de áudio anexado correspondente ao intervalo {ts_inicio} a {ts_fim}."
         )
@@ -346,13 +338,7 @@ CONTEXTO GLOBAL DO VÍDEO:
                 arquivo_google = self.client.files.upload(file=caminho_audio_chunk)
                 conteudos.append(arquivo_google)
 
-            try:
-                resp = self._chamar_gemini_com_retry(self.model_name, conteudos, config_obj)
-            except Exception:
-                if self.fallback_model and self.fallback_model != self.model_name:
-                    resp = self._chamar_gemini_com_retry(self.fallback_model, conteudos, config_obj)
-                else:
-                    raise
+            resp = self._chamar_com_fallback(self.model_name, conteudos, config_obj)
 
             if not resp or not resp.parsed:
                 raise ValueError(f"Falha ao analisar o bloco {idx}/{total}.")
@@ -362,7 +348,7 @@ CONTEXTO GLOBAL DO VÍDEO:
                 try:
                     self.client.files.delete(name=arquivo_google.name)
                 except Exception:
-                    pass  
+                    pass
 
     def _consolidar_segmentos(self, dados_video: Dict[str, Any], segmentos_analisados: List[SegmentoAnalise]) -> AnaliseVideo:
         """Funde as entidades recolhidas em todos os blocos e gera o resumo executivo global (Reduce)."""
@@ -391,21 +377,15 @@ CONTEXTO GLOBAL DO VÍDEO:
             todos_recursos.extend(seg.recursos_e_links)
 
             oradores_str = f" _(Oradores: {', '.join(seg.oradores_ou_apresentadores)})_" if seg.oradores_ou_apresentadores else ""
-            takeaways_str = "
-    * " + "
-    * ".join(seg.takeaways_bloco) if seg.takeaways_bloco else ""
-            bloco_cap = f"**{seg.timestamp_inicio} - {seg.timestamp_fim}: {seg.titulo_segmento}**{oradores_str}
-  - {seg.resumo_bloco}{takeaways_str}"
+            takeaways_str = "\n    * " + "\n    * ".join(seg.takeaways_bloco) if seg.takeaways_bloco else ""
+            bloco_cap = f"**{seg.timestamp_inicio} - {seg.timestamp_fim}: {seg.titulo_segmento}**{oradores_str}\n  - {seg.resumo_bloco}{takeaways_str}"
             capitulos.append(bloco_cap)
 
             resumo_blocos_texto_lista.append(
-                f"- Bloco [{seg.timestamp_inicio} - {seg.timestamp_fim}] {seg.titulo_segmento}{oradores_str}:
-  {seg.resumo_bloco}"
+                f"- Bloco [{seg.timestamp_inicio} - {seg.timestamp_fim}] {seg.titulo_segmento}{oradores_str}:\n  {seg.resumo_bloco}"
             )
 
-        resumo_blocos_texto = "
-
-".join(resumo_blocos_texto_lista)
+        resumo_blocos_texto = "\n\n".join(resumo_blocos_texto_lista)
 
         prompt_sintese = f"""
 És um assistente especializado em Gestão de Conhecimento Pessoal (PKM) e síntese técnica para o Obsidian.
@@ -433,22 +413,13 @@ Responde estritamente de acordo com o esquema JSON fornecido.
             temperature=0.2,
         )
 
-        try:
-            resp_sintese = self._chamar_gemini_com_retry(self.model_name, [prompt_sintese], config_obj)
-        except Exception:
-            if self.fallback_model and self.fallback_model != self.model_name:
-                resp_sintese = self._chamar_gemini_com_retry(self.fallback_model, [prompt_sintese], config_obj)
-            else:
-                raise
+        resp_sintese = self._chamar_com_fallback(self.model_name, [prompt_sintese], config_obj)
 
-        # 🛡️ Validação defensiva para apanhar respostas vazias ou nulas do Gemini
         if not resp_sintese or not resp_sintese.parsed:
             raise ValueError("O Gemini devolveu uma resposta nula ou inválida na síntese global do vídeo longo.")
 
         sintese: SinteseGlobal = resp_sintese.parsed
 
-        # Canonicalização de entidades (substitui as desduplicar_* de entidades)
-        # ------------------------------------------------------------------
         canon = _criar_canonicalizer()
 
         pessoas_canon = canon.canonicalizar_pessoas(todas_pessoas)
@@ -457,7 +428,7 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         organizacoes_canon = canon.canonicalizar_strings("organizacao", todas_orgs)
         temas_canon = canon.canonicalizar_strings("tema", todos_temas)
 
-        canon.gravar()  # persiste aliases.yaml, decisoes.jsonl, revisao.md
+        canon.gravar()
 
         return AnaliseVideo(
             titulo_sugerido=sintese.titulo_sugerido or dados_video.get('titulo'),
@@ -507,7 +478,6 @@ Responde estritamente de acordo com o esquema JSON fornecido.
                 segmentos_analisados.append(analise_bloco)
                 time.sleep(1)
         finally:
-            # Limpa sempre todas as fatias temporárias de áudio geradas pelo ffmpeg
             for seg in segmentos:
                 chunk_path = seg.get("caminho_audio_chunk")
                 if chunk_path and os.path.exists(chunk_path):
@@ -538,16 +508,10 @@ METADADOS DO VÍDEO:
 DESCRIÇÃO ORIGINAL DO VÍDEO (RECURSOS, LINKS E TIMESTAMPS):
 {dados_video.get('descricao', '')}
 """
-        # O fallback/condicional que garante que o texto da transcrição é incluído se existir
         if transcricao:
-            prompt += f"
-TRANSCRIÇÃO COMPLETA:
-{transcricao}
-"
-        
-        # Injeção das regras comuns unificadas
-        prompt += f"
-{INSTRUCOES_EXTRACAO_COMUNS}"
+            prompt += f"\nTRANSCRIÇÃO COMPLETA:\n{transcricao}\n"
+
+        prompt += f"\n{INSTRUCOES_EXTRACAO_COMUNS}"
 
         config_obj = types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -565,14 +529,7 @@ TRANSCRIÇÃO COMPLETA:
 
         response = None
         try:
-            try:
-                response = self._chamar_gemini_com_retry(self.model_name, conteudos, config_obj)
-            except Exception as e:
-                if self.fallback_model and self.fallback_model != self.model_name:
-                    print(f"    🔄 Modelo {self.model_name} indisponível. A alternar para modelo de contingência {self.fallback_model}...")
-                    response = self._chamar_gemini_com_retry(self.fallback_model, conteudos, config_obj)
-                else:
-                    raise e
+            response = self._chamar_com_fallback(self.model_name, conteudos, config_obj)
         finally:
             if arquivo_google:
                 try:
@@ -580,11 +537,9 @@ TRANSCRIÇÃO COMPLETA:
                 except Exception:
                     pass
 
-
         if not response or not response.parsed:
             raise ValueError("O Gemini não devolveu um resultado estruturado válido.")
 
-        # Canonicalização de entidades
         analise: AnaliseVideo = response.parsed
         canon = _criar_canonicalizer()
 
@@ -634,13 +589,7 @@ Responde estritamente de acordo com o esquema JSON fornecido.
             temperature=0.1,
         )
 
-        try:
-            resp = self._chamar_gemini_com_retry(config.MODELO_SCOUT, [prompt], config_obj)
-        except Exception:
-            if self.fallback_model and self.fallback_model != config.MODELO_SCOUT:
-                resp = self._chamar_gemini_com_retry(self.fallback_model, [prompt], config_obj)
-            else:
-                raise
+        resp = self._chamar_com_fallback(config.MODELO_SCOUT, [prompt], config_obj)
 
         if not resp or not resp.parsed:
             raise ValueError("Falha ao executar o Scout sobre o vídeo.")
@@ -699,20 +648,13 @@ Responde estritamente de acordo com o esquema JSON fornecido.
             temperature=0.2,
         )
 
-        try:
-            resp = self._chamar_gemini_com_retry(self.model_name, [prompt], config_obj)
-        except Exception:
-            if self.fallback_model and self.fallback_model != self.model_name:
-                resp = self._chamar_gemini_com_retry(self.fallback_model, [prompt], config_obj)
-            else:
-                raise
+        resp = self._chamar_com_fallback(self.model_name, [prompt], config_obj)
 
         if not resp or not resp.parsed:
             raise ValueError(f"Falha ao analisar a palestra #{sessao.ordem}: {sessao.titulo_palestra}")
 
         palestra: PalestraAnalise = resp.parsed
 
-        # Canonicalização de entidades em tempo real
         palestra.pessoas = canon.canonicalizar_pessoas(palestra.pessoas)
         palestra.artefactos = canon.canonicalizar_artefactos(palestra.artefactos)
         palestra.obras = canon.canonicalizar_obras(palestra.obras)
@@ -733,11 +675,9 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         dia_rotulo = agenda.dia_rotulo or f"Dia {agenda.dia or 1}"
         total = len(agenda.sessoes)
 
-        print(f"
-🏛️ A processar Conferência: '{agenda.nome_conferencia}' ({dia_rotulo})")
+        print(f"\n🏛️ A processar Conferência: '{agenda.nome_conferencia}' ({dia_rotulo})")
         print(f"📁 Pasta de destino: Videos/{agenda.nome_conferencia}/")
-        print(f"📋 Total de palestras a extrair: {total}
-")
+        print(f"📋 Total de palestras a extrair: {total}\n")
 
         canon = _criar_canonicalizer()
         palestras_processadas = []
@@ -746,22 +686,17 @@ Responde estritamente de acordo com o esquema JSON fornecido.
             orador_str = sessao.orador_principal or "Painel"
             print(f"   -> [{idx:02d}/{total:02d}] {sessao.timestamp_inicio} {orador_str}: {sessao.titulo_palestra[:45]}...")
 
-            # Extrai os blocos correspondentes a esta palestra
             blocos_fatia = [b for b in blocos if sessao.segundos_inicio <= b['start'] <= sessao.segundos_fim]
             if not blocos_fatia:
-                # Fallback se a margem for apertada: procura o bloco mais próximo
                 blocos_fatia = [b for b in blocos if (sessao.segundos_inicio - 30) <= b['start'] <= (sessao.segundos_fim + 30)]
 
-            texto_fatia = "
-".join([f"{formatar_tempo(b['start'])} {b['text']}" for b in blocos_fatia])
+            texto_fatia = "\n".join([f"{formatar_tempo(b['start'])} {b['text']}" for b in blocos_fatia])
             if not texto_fatia.strip():
                 print(f"      ⚠️ Aviso: Transcrição vazia para a sessão #{sessao.ordem}. A avançar...")
                 continue
 
-            # Analisa a palestra individualmente
             analise_palestra = self.analisar_palestra(dados_video, agenda, sessao, texto_fatia, canon)
 
-            # Grava a nota atómica na subpasta da conferência
             caminho_nota = writer.salvar_palestra_conferencia(dados_video, agenda, sessao, analise_palestra, data_leitura)
             palestras_processadas.append({
                 "sessao": sessao,
@@ -769,15 +704,11 @@ Responde estritamente de acordo com o esquema JSON fornecido.
                 "analise": analise_palestra
             })
 
-            # Intervalo para respeitar cotas de chamadas da API
             time.sleep(1)
 
-        # Grava os aliases aprendidos durante a conferência
         canon.gravar()
 
-        # Cria ou atualiza o MOC central da conferência
-        print("
-   📑 A compilar/atualizar o Índice MOC da conferência...")
+        print("\n   📑 A compilar/atualizar o Índice MOC da conferência...")
         caminho_moc = writer.salvar_ou_atualizar_moc_conferencia(dados_video, agenda, palestras_processadas, data_leitura)
         print(f"   ✓ MOC da Conferência: {caminho_moc}")
 
