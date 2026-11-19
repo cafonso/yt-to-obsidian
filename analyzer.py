@@ -579,11 +579,7 @@ TRANSCRIÇÃO COMPLETA:
                     self.client.files.delete(name=arquivo_google.name)
                 except Exception:
                     pass
-            if caminho_audio and os.path.exists(caminho_audio):
-                try:
-                    os.remove(caminho_audio)
-                except Exception:
-                    pass
+
 
         if not response or not response.parsed:
             raise ValueError("O Gemini não devolveu um resultado estruturado válido.")
