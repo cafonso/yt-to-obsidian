@@ -52,10 +52,9 @@ def processar_um_video(
     video_id = extrair_id_youtube(url)
     historico = carregar_historico()
 
-    if not forcar and video_id and video_id in historico:
+    if video_id and not forcar and video_id in historico:
         titulo_antigo = historico[video_id].get("titulo", "Vídeo")
         print(f"⏭️ [Saltar] '{titulo_antigo}' já foi integrado no Obsidian. (Usa --forcar para reanalisar)")
-        return True
 
     print(f"\n=======================================================")
     print(f"▶️ A processar: {url}")
