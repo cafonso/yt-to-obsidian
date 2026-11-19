@@ -1,11 +1,5 @@
 # 🧠 YouTube to Obsidian Knowledge Graph
 
-Ferramenta automatizada de PKM (Personal Knowledge Management) para transformar vídeos do YouTube num grafo de conhecimento atómico, denso e bidirecional no **Obsidian**, potenciado pelo **Google Gemini 3.5 Flash**.
-
----
-
-🧠 YouTube to Obsidian Knowledge Graph
-
 Ferramenta automatizada de PKM (Personal Knowledge Management) para transformar vídeos e conferências do YouTube num grafo de conhecimento atómico, denso e bidirecional no Obsidian, potenciado pelo Google Gemini.
 
 🌟 O que a Ferramenta Extrai Sistematicamente
@@ -69,6 +63,8 @@ uv run python main.py --lista lista_de_videos.txt --forcar
 uv run python main.py "https://www.youtube.com/watch?v=..." --split
 uv run python main.py "https://www.youtube.com/watch?v=..." --unico
 
+# 6. Usar o interface web
+uv run streamlit run app.py
 
 🧪 Executar Testes Automatizados
 
@@ -104,6 +100,7 @@ Repositório
 ├── utils.py             # Validadores de nomes de pessoas e organizações
 ├── vault_writer.py      # Escrita estruturada de notas e diários no Obsidian
 ├── pyproject.toml       # Configuração do projeto, dependências e pytest
+├── scripts              # Programas usados para auxílio não fazendo parte do
 └── tests/               # Testes unitários e de integração
     ├── test_pkm.py
     └── test_vault_writer.py
