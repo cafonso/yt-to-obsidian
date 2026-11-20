@@ -74,7 +74,18 @@ class ObsidianVaultWriter:
     # ------------------------------------------------------------------
     # Helpers internos
     # ------------------------------------------------------------------
+    def _inserir_antes_resenha(self, conteudo: str, bloco_novo: str) -> str | None:
+        """Insere bloco_novo antes da secção '# Resenha do dia' sem interpretar sequências de regex."""
+        match = re.search(r"(#\s+Resenha do [Dd]ia)", conteudo)
+        if not match:
+            return None
 
+        idx = match.start()
+        antes = conteudo[:idx].rstrip()
+        resenha = conteudo[idx:]
+        if antes:
+            return f"{antes}\n\n{bloco_novo}\n\n{resenha}"
+        return f"{bloco_novo}\n\n{resenha}"
     def _adicionar_link_se_nao_existir(self, conteudo: str, seccao_titulo: str, novo_link: str) -> str:
         """Adiciona um item a uma secção do markdown se ele ainda não estiver presente."""
         if novo_link in conteudo:
@@ -359,19 +370,19 @@ Link: {dados_video.get('url')}
             if "# Resenha do dia" in conteudo or "# Resenha do Dia" in conteudo:
                 padrao = r"(#\s+Resenha do [Dd]ia)"
                 substituicao = f"{bloco_novo}\n\\1"
-                novo_conteudo, count = re.subn(padrao, substituicao, conteudo, count=1)
-                if count > 0:
+                novo_conteudo = self._inserir_antes_resenha(conteudo, bloco_novo)
+                if novo_conteudo is not None:
                     caminho_diario.write_text(novo_conteudo, encoding="utf-8")
-                    print(f"    ✓ Diário {data_leitura}.md atualizado com o bloco de metadados antes da resenha.")
+                    print(f"    ✓ Diário {data_leitura}.md atualizado com o bloco de metadados antes da resenha.\n")
                     return
 
             # Caso contrário, acrescenta no fim do diário
             novo_conteudo = conteudo.rstrip() + f"\n\n{bloco_novo}\n"
             caminho_diario.write_text(novo_conteudo, encoding="utf-8")
-            print(f"    ✓ Diário {data_leitura}.md atualizado com o novo bloco de metadados.")
+            print(f"    ✓ Diário {data_leitura}.md atualizado com o novo bloco de metadados.\n")
         else:
             caminho_diario.write_text(bloco_novo + "\n", encoding="utf-8")
-            print(f"    ✓ Diário {data_leitura}.md criado com o bloco de metadados.")
+            print(f"    ✓ Diário {data_leitura}.md criado com o bloco de metadados.\n")
 
     # ------------------------------------------------------------------
     # Nota principal do vídeo
@@ -816,15 +827,15 @@ Link da Transmissão: {dados_video.get('url')}
             if "# Resenha do dia" in conteudo or "# Resenha do Dia" in conteudo:
                 padrao = r"(#\s+Resenha do [Dd]ia)"
                 substituicao = f"{bloco_novo}\n\\1"
-                novo_conteudo, count = re.subn(padrao, substituicao, conteudo, count=1)
-                if count > 0:
+                novo_conteudo = self._inserir_antes_resenha(conteudo, bloco_novo)
+                if novo_conteudo is not None:
                     caminho_diario.write_text(novo_conteudo, encoding="utf-8")
-                    print(f"    ✓ Diário {data_leitura}.md atualizado com a conferência {moc_wikilink} ({dia_rotulo}).")
+                    print(f"    ✓ {moc_wikilink} ({dia_rotulo}).md atualizado com o bloco de metadados antes da resenha.\n")
                     return
 
             novo_conteudo = conteudo.rstrip() + f"\n\n{bloco_novo}\n"
             caminho_diario.write_text(novo_conteudo, encoding="utf-8")
-            print(f"    ✓ Diário {data_leitura}.md atualizado com a conferência {moc_wikilink} ({dia_rotulo}).")
+            print(f"    ✓ Diário {data_leitura}.md atualizado com a conferência {moc_wikilink} ({dia_rotulo}).\n")
         else:
             caminho_diario.write_text(bloco_novo + "\n", encoding="utf-8")
-            print(f"    ✓ Diário {data_leitura}.md criado com a conferência {moc_wikilink} ({dia_rotulo}).")
+            print(f"    ✓ Diário {data_leitura}.md criado com a conferência {moc_wikilink} ({dia_rotulo}).\n")
