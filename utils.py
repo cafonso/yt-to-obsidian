@@ -1,18 +1,26 @@
-import re
-import urllib.request
-import urllib.error
-from typing import List, Optional
 import http.client
-
 import logging
 from pathlib import Path
+import re
+import urllib.error
+import urllib.request
+
 import config
+
+
+def validar_cofre(pasta_cofre: str | Path) -> Path:
+    """Garante que o caminho do cofre existe e é um diretório."""
+    caminho = Path(pasta_cofre)
+    if not caminho.exists() or not caminho.is_dir():
+        raise FileNotFoundError(f"A pasta do cofre não existe: {caminho}")
+    return caminho
 
 
 def _resolver_caminho_log(pasta_cofre: str | Path | None = None) -> Path:
     """Resolve o ficheiro de registo dentro da pasta de logs do cofre indicado."""
     base = Path(pasta_cofre) if pasta_cofre else Path(config.COFRE_PADRAO)
-    return base / "logs" / config.LIVRO_REGISTO
+    nome_ficheiro = Path(config.LIVRO_REGISTO).name
+    return base / "logs" / nome_ficheiro
 
 
 def configurar_logging(
@@ -20,7 +28,8 @@ def configurar_logging(
     nivel_str: str = config.LOG_LEVEL,
 ) -> logging.Logger:
     """Configura ou reconfigura o logger partilhado para a pasta de logs do cofre."""
-    caminho_log = _resolver_caminho_log(pasta_cofre)
+    cofre_validado = validar_cofre(pasta_cofre if pasta_cofre else config.COFRE_PADRAO)
+    caminho_log = _resolver_caminho_log(cofre_validado)
     caminho_log.parent.mkdir(parents=True, exist_ok=True)
 
     logger = logging.getLogger("yt_obsidian")
@@ -33,7 +42,6 @@ def configurar_logging(
     )
     formato_consola = logging.Formatter("%(message)s")
 
-    # Garante um único StreamHandler para a consola
     tem_consola = any(
         isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
         for h in logger.handlers
@@ -43,7 +51,6 @@ def configurar_logging(
         console_handler.setFormatter(formato_consola)
         logger.addHandler(console_handler)
 
-    # Substitui apenas o(s) FileHandler(s) anteriores pelo novo ficheiro do cofre
     for handler in list(logger.handlers):
         if isinstance(handler, logging.FileHandler):
             handler.close()
@@ -54,6 +61,7 @@ def configurar_logging(
     logger.addHandler(file_handler)
 
     return logger
+
 
 def verificar_link_ativo(url: str, timeout: float = 3.5) -> bool:
     """Verifica de forma leve se um URL responde com sucesso (200-399)."""
@@ -78,6 +86,7 @@ def verificar_link_ativo(url: str, timeout: float = 3.5) -> bool:
     except (OSError, http.client.HTTPException):
         return False
 
+
 PALAVRAS_ORGANIZACAO = {
     "inc", "corp", "corporation", "labs", "lab", "university", "universidade",
     "institute", "instituto", "foundation", "fundação",
@@ -86,7 +95,7 @@ PALAVRAS_ORGANIZACAO = {
     "systems", "sistemas", "solutions", "solucoes",
     "ai", "ia", "llc", "ltd", "gmbh", "sa", "plc", "holdings",
     "ventures", "capital", "partners", "studio", "studios",
-    "media", "network", "networks", "cloud", "compute", "semiconductor", "Lda",
+    "media", "network", "networks", "cloud", "compute", "semiconductor", "lda",
 }
 
 ORGANIZACOES_CONHECIDAS = {
@@ -103,6 +112,7 @@ ORGANIZACOES_CONHECIDAS = {
     "deeplearning.ai", "coursera", "udacity", "kaggle",
     "latent space", "ai engineer", "canonical", "ubuntu", "linux foundation",
 }
+
 
 def eh_organizacao(nome: str) -> bool:
     """Determina se um nome corresponde a uma organização."""
@@ -122,6 +132,7 @@ def eh_organizacao(nome: str) -> bool:
         return True
 
     return False
+
 
 def eh_nome_valido_pessoa(nome: str) -> bool:
     """Valida se o nome parece um nome de pessoa real (Nome + Apelido) e não uma organização."""

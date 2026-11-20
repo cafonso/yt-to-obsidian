@@ -6,11 +6,6 @@ import datetime
 import argparse
 from pathlib import Path
 from typing import Optional
-import logging
-from utils import configurar_logging
-
-
-logger = configurar_logging()
 
 # Garante suporte a UTF-8 no terminal Windows para emojis e acentos
 if hasattr(sys.stdout, "reconfigure"):
@@ -21,25 +16,52 @@ if hasattr(sys.stdout, "reconfigure"):
         pass
 
 import config
+from utils import configurar_logging
 from extrator import YouTubeExtractor, extrair_id_youtube
 from analyzer import VideoAnalyzer
 from vault_writer import ObsidianVaultWriter
 
+logger = configurar_logging()
 DEFAULT_VAULT_PATH = config.DEFAULT_VAULT_PATH
-HISTORICO_FILE = Path("historico_processados.json")
+NOME_HISTORICO = "historico_processados.json"
 
 
-def carregar_historico() -> dict:
-    if HISTORICO_FILE.exists():
+def _resolver_caminho_historico(vault_path: Optional[str | Path] = None) -> Path:
+    """Resolve o ficheiro de histórico para o cofre atual, com fallback para o diretório de trabalho."""
+    if vault_path:
+        base_dir = Path(vault_path)
+        if base_dir.exists() and base_dir.is_dir():
+            return base_dir / NOME_HISTORICO
+    return Path(NOME_HISTORICO)
+
+
+def carregar_historico(caminho_historico: Path) -> dict:
+    if caminho_historico.exists():
         try:
-            return json.loads(HISTORICO_FILE.read_text(encoding="utf-8"))
-        except Exception:
+            return json.loads(caminho_historico.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning("Não foi possível ler o histórico '%s': %s", caminho_historico, e)
             return {}
     return {}
 
 
-def gravar_historico(historico: dict):
-    HISTORICO_FILE.write_text(json.dumps(historico, indent=2, ensure_ascii=False), encoding="utf-8")
+def gravar_historico(historico: dict, caminho_historico: Path) -> None:
+    try:
+        caminho_historico.parent.mkdir(parents=True, exist_ok=True)
+        caminho_historico.write_text(
+            json.dumps(historico, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as e:
+        logger.warning("Não foi possível gravar o histórico '%s': %s", caminho_historico, e)
+
+
+def _obter_vault_de_writer(writer: ObsidianVaultWriter) -> Optional[Path]:
+    for attr in ("vault_path", "caminho_vault", "vault", "base_path"):
+        valor = getattr(writer, attr, None)
+        if valor:
+            return Path(valor)
+    return None
 
 
 def processar_um_video(
@@ -48,22 +70,27 @@ def processar_um_video(
     analyzer: VideoAnalyzer,
     writer: ObsidianVaultWriter,
     forcar: bool = False,
-    data_leitura: str = None,
-    modo_conferencia: Optional[str] = None
+    data_leitura: Optional[str] = None,
+    modo_conferencia: Optional[str] = None,
+    vault_path: Optional[str | Path] = None,
 ) -> bool:
     if not data_leitura:
         data_leitura = datetime.date.today().isoformat()
 
+    caminho_cofre = Path(vault_path) if vault_path else _obter_vault_de_writer(writer)
+    caminho_historico = _resolver_caminho_historico(caminho_cofre)
+
     video_id = extrair_id_youtube(url)
-    historico = carregar_historico()
+    historico = carregar_historico(caminho_historico)
 
     if video_id and not forcar and video_id in historico:
         titulo_antigo = historico[video_id].get("titulo", "Vídeo")
         print(f"⏭️ [Saltar] '{titulo_antigo}' já foi integrado no Obsidian. (Usa --forcar para reanalisar)")
+        return False
 
-    print(f"\n=======================================================")
+    print("\n=======================================================")
     print(f"▶️ A processar: {url}")
-    print(f"=======================================================")
+    print("=======================================================")
 
     dados_video = None
     try:
@@ -71,7 +98,7 @@ def processar_um_video(
         dados_video = extrator.extrair_tudo(url)
         print(f"    ✓ Título: {dados_video['titulo']}")
         print(f"    ✓ Canal: {dados_video['canal']}")
-        if dados_video.get('transcricao'):
+        if dados_video.get("transcricao"):
             print(f"    ✓ Transcrição: {len(dados_video['transcricao'].splitlines())} linhas")
         else:
             print("    ✓ Áudio capturado para processamento nativo")
@@ -83,8 +110,12 @@ def processar_um_video(
         # Deteção e Processamento de Conferências / Múltiplas Palestras (Scout)
         # ------------------------------------------------------------------
         deve_verificar_scout = (
-            modo_conferencia == "split" or
-            (modo_conferencia != "unico" and duracao > config.LIMIAR_VIDEO_LONGO_SEGUNDOS and tem_transcricao)
+            modo_conferencia == "split"
+            or (
+                modo_conferencia != "unico"
+                and duracao > config.LIMIAR_VIDEO_LONGO_SEGUNDOS
+                and tem_transcricao
+            )
         )
 
         if deve_verificar_scout:
@@ -96,7 +127,9 @@ def processar_um_video(
                     print(f"    ✓ Conferência detetada: '{agenda.nome_conferencia}' ({dia_rotulo})")
                     print(f"    ✓ Total de palestras identificadas: {len(agenda.sessoes)}")
 
-                    caminho_moc = analyzer.processar_conferencia_completa(dados_video, agenda, writer, data_leitura)
+                    caminho_moc = analyzer.processar_conferencia_completa(
+                        dados_video, agenda, writer, data_leitura
+                    )
 
                     if video_id:
                         historico[video_id] = {
@@ -106,9 +139,9 @@ def processar_um_video(
                             "data_leitura": data_leitura,
                             "nota": str(caminho_moc),
                             "tipo": "conferencia",
-                            "total_palestras": len(agenda.sessoes)
+                            "total_palestras": len(agenda.sessoes),
                         }
-                        gravar_historico(historico)
+                        gravar_historico(historico, caminho_historico)
 
                     print("\n🎉 Conferência integrada com sucesso no Obsidian!")
                     return True
@@ -142,15 +175,16 @@ def processar_um_video(
                 "canal": dados_video.get("canal"),
                 "url": url,
                 "data_leitura": data_leitura,
-                "nota": str(caminho_nota)
+                "nota": str(caminho_nota),
             }
-            gravar_historico(historico)
+            gravar_historico(historico, caminho_historico)
 
         print("🎉 Concluído com sucesso!")
         return True
 
     except Exception as e:
         print(f"❌ Erro ao processar o vídeo {url}: {str(e)}")
+        logger.exception("Falha ao processar o vídeo %s", url)
         return False
     finally:
         # Garante que o áudio temporário é sempre apagado, mesmo em caso de erro
@@ -161,13 +195,22 @@ def processar_um_video(
                     os.remove(caminho_audio)
                 except Exception:
                     pass
-def processar_ficheiro_lista(caminho_lista: str, extrator: YouTubeExtractor, analyzer: VideoAnalyzer, writer: ObsidianVaultWriter, forcar: bool = False):
+
+
+def processar_ficheiro_lista(
+    caminho_lista: str,
+    extrator: YouTubeExtractor,
+    analyzer: VideoAnalyzer,
+    writer: ObsidianVaultWriter,
+    forcar: bool = False,
+    vault_path: Optional[str | Path] = None,
+) -> None:
     caminho = Path(caminho_lista)
     if not caminho.exists():
         print(f"❌ Erro: O ficheiro de lista '{caminho_lista}' não foi encontrado.")
         return
 
-    PADRAO_DATA = re.compile(r'^#\s*(\d{4}-\d{2}-\d{2})\s*$')
+    padrao_data = re.compile(r"^#\s*(\d{4}-\d{2}-\d{2})\s*$")
     data_leitura_atual = datetime.date.today().isoformat()
     entradas = []
     erros_formato = 0
@@ -182,11 +225,10 @@ def processar_ficheiro_lista(caminho_lista: str, extrator: YouTubeExtractor, ana
         linha = linha.strip()
         if not linha:
             continue
-            
-        match_data = PADRAO_DATA.match(linha)
+
+        match_data = padrao_data.match(linha)
         if match_data:
             data_str = match_data.group(1)
-            # Validação simples da data
             try:
                 datetime.date.fromisoformat(data_str)
                 data_leitura_atual = data_str
@@ -194,12 +236,10 @@ def processar_ficheiro_lista(caminho_lista: str, extrator: YouTubeExtractor, ana
             except ValueError:
                 print(f"⚠️ Aviso (linha {num_linha}): Data inválida encontrada '{data_str}'. A manter a anterior.")
             continue
-            
+
         if linha.startswith("#"):
-            # Comentário livre
             continue
-            
-        # Validar se a linha parece um URL válido do YouTube
+
         if extrator.validar_url_youtube(linha) or "youtube.com" in linha or "youtu.be" in linha:
             if extrator.validar_url_youtube(linha):
                 entradas.append((linha, data_leitura_atual))
@@ -220,16 +260,25 @@ def processar_ficheiro_lista(caminho_lista: str, extrator: YouTubeExtractor, ana
     sucessos = 0
     for idx, (url, data_leitura) in enumerate(entradas, 1):
         print(f"\n[{idx}/{total}]")
-        if processar_um_video(url, extrator, analyzer, writer, forcar=forcar, data_leitura=data_leitura):
+        if processar_um_video(
+            url,
+            extrator,
+            analyzer,
+            writer,
+            forcar=forcar,
+            data_leitura=data_leitura,
+            vault_path=vault_path,
+        ):
             sucessos += 1
 
-    print(f"\n=======================================================")
+    print("\n=======================================================")
     print(f"🏁 Processamento Concluído: {sucessos}/{total} vídeos integrados com sucesso!")
-    print(f"=======================================================\n")
-    
-def mostrar_revisao_canonicalizacao():
+    print("=======================================================\n")
+
+
+def mostrar_revisao_canonicalizacao() -> None:
     """Opção 5: mostra o conteúdo de revisao.md (pares ambíguos para confirmação manual)."""
-    caminho = config.REVISAO_PATH
+    caminho = Path(config.REVISAO_PATH)
     if not caminho.exists():
         print("\n✓ Não há pares para revisão (revisao.md não existe ou está vazio).")
         return
@@ -241,9 +290,8 @@ def mostrar_revisao_canonicalizacao():
     print(conteudo)
 
 
-def mostrar_config_canonicalizacao():
+def mostrar_config_canonicalizacao() -> None:
     """Opção 6: mostra os paths e thresholds usados pela canonicalização."""
-    # Usa config se as variáveis existirem; senão recorre aos defaults do Canonicalizer.
     aliases = getattr(config, "ALIASES_PATH", "aliases.yaml")
     decisoes = getattr(config, "DECISOES_PATH", "decisoes.jsonl")
     revisao = getattr(config, "REVISAO_PATH", "revisao.md")
@@ -261,7 +309,6 @@ def mostrar_config_canonicalizacao():
     print(f"   blocking:           {'último token' if blocking else 'todos os canónicos'}")
     print(f"   aprender aliases:   {'sim' if aprender else 'não'}")
 
-    # Indica também se os ficheiros já existem (útil para saber se já correu).
     print("\n📄 Estado dos ficheiros:")
     for rotulo, caminho in (("aliases", aliases), ("decisões", decisoes), ("revisão", revisao)):
         p = Path(caminho)
@@ -269,15 +316,16 @@ def mostrar_config_canonicalizacao():
         print(f"   {rotulo}: {estado}")
 
 
-def menu_interativo(vault_path: str):
+def menu_interativo(vault_path: str) -> None:
+    global logger
     extrator = YouTubeExtractor()
     analyzer = VideoAnalyzer()
     writer = ObsidianVaultWriter(vault_path)
 
     while True:
-        print("\n" + "="*50)
+        print("\n" + "=" * 50)
         print("🧠 YOUTUBE TO OBSIDIAN KNOWLEDGE GRAPH")
-        print("="*50)
+        print("=" * 50)
         print(f"📂 Cofre Atual: {os.path.abspath(vault_path)}")
         print("1. Processar 1 vídeo por URL")
         print("2. Processar lista de vídeos (lista_de_videos.txt)")
@@ -286,26 +334,32 @@ def menu_interativo(vault_path: str):
         print("5. Ver fila de revisão de canonicalização (revisao.md)")
         print("6. Ver configuração da canonicalização")
         print("0. Sair")
-        print("="*50)
+        print("=" * 50)
 
         opcao = input("Escolhe uma opção: ").strip()
 
         if opcao == "1":
             url = input("\nCola o link do YouTube: ").strip()
             if url:
-                processar_um_video(url, extrator, analyzer, writer, forcar=True)
+                processar_um_video(url, extrator, analyzer, writer, forcar=True, vault_path=vault_path)
         elif opcao == "2":
-            processar_ficheiro_lista("lista_de_videos.txt", extrator, analyzer, writer)
+            processar_ficheiro_lista("lista_de_videos.txt", extrator, analyzer, writer, vault_path=vault_path)
         elif opcao == "3":
             caminho = input("\nNome do ficheiro de texto: ").strip()
             if caminho:
-                processar_ficheiro_lista(caminho, extrator, analyzer, writer)
+                processar_ficheiro_lista(caminho, extrator, analyzer, writer, vault_path=vault_path)
         elif opcao == "4":
             novo_vault = input("\nNovo caminho para a pasta do teu Vault do Obsidian: ").strip()
             if novo_vault:
-                vault_path = novo_vault
-                writer = ObsidianVaultWriter(vault_path)
-                print(f"✓ Caminho do Vault atualizado para: {os.path.abspath(vault_path)}")
+                try:
+                    logger = configurar_logging(novo_vault)
+                    vault_path = novo_vault
+                    writer = ObsidianVaultWriter(vault_path)
+                    print(f"✓ Caminho do Vault atualizado para: {os.path.abspath(vault_path)}")
+                except FileNotFoundError as exc:
+                    print(f"! {exc}")
+                except Exception as exc:
+                    print(f"! Erro ao configurar o novo Vault: {exc}")
         elif opcao == "5":
             mostrar_revisao_canonicalizacao()
         elif opcao == "6":
@@ -317,7 +371,8 @@ def menu_interativo(vault_path: str):
             print("Opção inválida.")
 
 
-def main():
+def main() -> None:
+    global logger
     parser = argparse.ArgumentParser(description="Extrai conhecimento de vídeos do YouTube diretamente para o Obsidian.")
     parser.add_argument("url", nargs="?", help="URL do vídeo do YouTube a processar")
     parser.add_argument("--lista", "-l", help="Caminho para ficheiro .txt com lista de URLs")
@@ -327,6 +382,12 @@ def main():
     parser.add_argument("--unico", action="store_true", help="Forçar nota única consolidada mesmo se for vídeo longo")
     args = parser.parse_args()
 
+    if args.vault:
+        try:
+            logger = configurar_logging(args.vault)
+        except Exception:
+            pass
+
     extrator = YouTubeExtractor()
     analyzer = VideoAnalyzer()
     writer = ObsidianVaultWriter(args.vault)
@@ -334,9 +395,24 @@ def main():
     modo_conf = "split" if args.split else ("unico" if args.unico else None)
 
     if args.url:
-        processar_um_video(args.url, extrator, analyzer, writer, forcar=args.forcar, modo_conferencia=modo_conf)
+        processar_um_video(
+            args.url,
+            extrator,
+            analyzer,
+            writer,
+            forcar=args.forcar,
+            modo_conferencia=modo_conf,
+            vault_path=args.vault,
+        )
     elif args.lista:
-        processar_ficheiro_lista(args.lista, extrator, analyzer, writer, forcar=args.forcar)
+        processar_ficheiro_lista(
+            args.lista,
+            extrator,
+            analyzer,
+            writer,
+            forcar=args.forcar,
+            vault_path=args.vault,
+        )
     else:
         menu_interativo(args.vault)
 
