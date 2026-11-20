@@ -10,6 +10,7 @@ from canonicalizer import Canonicalizer
 import random
 import re
 from config import FALLBACK_MODEL
+import unicodedata
 
 
 INSTRUCOES_EXTRACAO_COMUNS = """
@@ -154,13 +155,21 @@ class VideoAnalyzer:
                 )
             except Exception as e:
                 erro_str = str(e)
+                quota_diaria = (
+                    "PerDay" in erro_str
+                    or "per day" in erro_str.lower()
+                    or "GenerateRequestsPerDay" in erro_str
+                )
                 transitorio = (
-                    "503" in erro_str
-                    or "UNAVAILABLE" in erro_str
-                    or "429" in erro_str
-                    or "RESOURCE_EXHAUSTED" in erro_str
-                    or "timeout" in erro_str.lower()
-                    or "timed out" in erro_str.lower()
+                    not quota_diaria
+                    and (
+                        "503" in erro_str
+                        or "UNAVAILABLE" in erro_str
+                        or "429" in erro_str
+                        or "RESOURCE_EXHAUSTED" in erro_str
+                        or "timeout" in erro_str.lower()
+                        or "timed out" in erro_str.lower()
+                    )
                 )
                 if not transitorio or tentativa >= max_tentativas:
                     raise e
@@ -169,9 +178,10 @@ class VideoAnalyzer:
                 print(
                     f"    ⚠️ Erro/Timeout ({erro_str[:60]}...). "
                     f"A aguardar {espera:.1f}s antes da tentativa {tentativa + 1}/{max_tentativas}...",
-                    flush=True
+                    flush=True,
                 )
                 time.sleep(espera)
+        
 
     def _chamar_com_fallback(self, modelo: str, conteudos: list, config_obj: types.GenerateContentConfig):
         """Chama o Gemini com retry no modelo indicado e faz fallback se este falhar."""
@@ -372,13 +382,14 @@ CONTEXTO GLOBAL DO VÍDEO:
         capitulos = []
 
         resumo_blocos_texto_lista = []
+        takeaways_fallback = []
 
         for seg in segmentos_analisados:
             todas_pessoas.extend(seg.pessoas)
             todas_obras.extend(seg.obras)
             todas_orgs.extend(seg.organizacoes)
             todos_artefactos.extend(seg.artefactos)
-            todos_temas.extend(seg.temas)
+            todas_temas.extend(seg.temas)
             todas_metricas.extend(seg.metricas_e_numeros)
             todas_tensoes.extend(seg.tensoes_e_riscos)
             todas_agendas.extend(seg.agenda_e_previsoes)
@@ -392,6 +403,7 @@ CONTEXTO GLOBAL DO VÍDEO:
             resumo_blocos_texto_lista.append(
                 f"- Bloco [{seg.timestamp_inicio} - {seg.timestamp_fim}] {seg.titulo_segmento}{oradores_str}:\n  {seg.resumo_bloco}"
             )
+            takeaways_fallback.extend(seg.takeaways_bloco[:2])
 
         resumo_blocos_texto = "\n\n".join(resumo_blocos_texto_lista)
 
@@ -421,12 +433,19 @@ Responde estritamente de acordo com o esquema JSON fornecido.
             temperature=0.2,
         )
 
-        resp_sintese = self._chamar_com_fallback(self.model_name, [prompt_sintese], config_obj)
-
-        if not resp_sintese or not resp_sintese.parsed:
-            raise ValueError("O Gemini devolveu uma resposta nula ou inválida na síntese global do vídeo longo.")
-
-        sintese: SinteseGlobal = resp_sintese.parsed
+        try:
+            resp_sintese = self._chamar_com_fallback(self.model_name, [prompt_sintese], config_obj)
+            if not resp_sintese or not resp_sintese.parsed:
+                raise ValueError("O Gemini devolveu uma resposta nula ou inválida na síntese global do vídeo longo.")
+            sintese: SinteseGlobal = resp_sintese.parsed
+            titulo_sugerido = sintese.titulo_sugerido or dados_video.get("titulo")
+            resumo_executivo = sintese.resumo_executivo
+            takeaways_principais = sintese.takeaways_principais
+        except Exception as e_sintese:
+            print(f"    ⚠️ Síntese global falhou ({e_sintese}). A gerar consolidação local a partir dos blocos...", flush=True)
+            titulo_sugerido = dados_video.get("titulo")
+            resumo_executivo = "\n\n".join(seg.resumo_bloco for seg in segmentos_analisados if seg.resumo_bloco)
+            takeaways_principais = desduplicar_strings(takeaways_fallback)[:10]
 
         canon = _criar_canonicalizer()
 
@@ -439,9 +458,9 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         canon.gravar()
 
         return AnaliseVideo(
-            titulo_sugerido=sintese.titulo_sugerido or dados_video.get('titulo'),
-            resumo_executivo=sintese.resumo_executivo,
-            takeaways_principais=sintese.takeaways_principais,
+            titulo_sugerido=titulo_sugerido,
+            resumo_executivo=resumo_executivo,
+            takeaways_principais=takeaways_principais,
             metricas_e_numeros=desduplicar_strings(todas_metricas),
             tensoes_e_riscos=desduplicar_strings(todas_tensoes),
             agenda_e_previsoes=desduplicar_strings(todas_agendas),
@@ -451,9 +470,8 @@ Responde estritamente de acordo com o esquema JSON fornecido.
             pessoas=pessoas_canon,
             obras=obras_canon,
             organizacoes=organizacoes_canon,
-            artefactos=artefactos_canon
+            artefactos=artefactos_canon,
         )
-
     def analisar_video_longo(self, dados_video: Dict[str, Any]) -> AnaliseVideo:
         """Processa um vídeo longo dividindo-o em blocos (texto ou áudio) e consolidando no final."""
         blocos = dados_video.get("transcricao_blocos") or []
