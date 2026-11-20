@@ -355,6 +355,8 @@ def menu_interativo(vault_path: str) -> None:
                     logger = configurar_logging(novo_vault)
                     vault_path = novo_vault
                     writer = ObsidianVaultWriter(vault_path)
+                    if "analyzer" in locals() and analyzer is not None:
+                        analyzer.vault_path = Path(vault_path)
                     print(f"✓ Caminho do Vault atualizado para: {os.path.abspath(vault_path)}")
                 except FileNotFoundError as exc:
                     print(f"! {exc}")

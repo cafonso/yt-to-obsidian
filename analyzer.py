@@ -11,6 +11,7 @@ import random
 import re
 from config import FALLBACK_MODEL
 import unicodedata
+from pathlib import Path
 
 
 INSTRUCOES_EXTRACAO_COMUNS = """
@@ -120,12 +121,29 @@ def desduplicar_strings(lista: List[str]) -> List[str]:
 
 
 
-def _criar_canonicalizer() -> Canonicalizer:
+def _resolver_caminhos_canonicalizacao(vault_path: Optional[str | Path] = None) -> tuple[Path, Path, Path]:
+    """Devolve (aliases_path, decisoes_path, revisao_path) para o cofre ativo ou para config."""
+    if vault_path:
+        canon_dir = Path(vault_path) / Path(config.CANON_DIR).name
+        return (
+            canon_dir / Path(config.ALIASES_PATH).name,
+            canon_dir / Path(config.DECISOES_PATH).name,
+            canon_dir / Path(config.REVISAO_PATH).name,
+        )
+    return (
+        Path(config.ALIASES_PATH),
+        Path(config.DECISOES_PATH),
+        Path(config.REVISAO_PATH),
+    )
+
+
+def _criar_canonicalizer(vault_path: Optional[str | Path] = None) -> Canonicalizer:
     """Instancia o Canonicalizer com todas as definições centralizadas no config.py."""
+    aliases_path, decisoes_path, revisao_path = _resolver_caminhos_canonicalizacao(vault_path)
     return Canonicalizer(
-        aliases_path=config.ALIASES_PATH,
-        decisoes_path=config.DECISOES_PATH,
-        revisao_path=config.REVISAO_PATH,
+        aliases_path=aliases_path,
+        decisoes_path=decisoes_path,
+        revisao_path=revisao_path,
         threshold_fusao_auto=config.CANON_THRESHOLD_FUSAO_AUTO,
         threshold_revisao=config.CANON_THRESHOLD_REVISAO,
         blocking_por_ultimo_token=config.CANON_BLOCKING_POR_ULTIMO_TOKEN,
@@ -136,10 +154,16 @@ def _criar_canonicalizer() -> Canonicalizer:
 
 
 class VideoAnalyzer:
-    def __init__(self, model_name: str = None):
+    def __init__(
+        self,
+        model_name: Optional[str] = None,
+        vault_path: Optional[str | Path] = None,
+    ):
         self.model_name = model_name or config.MODELO_GEMINI
         self.fallback_model = FALLBACK_MODEL
         self.client = genai.Client(http_options={'api_version': 'v1beta', 'timeout': 180000})
+        self.vault_path = Path(vault_path) if vault_path else Path(config.DEFAULT_VAULT_PATH)
+  
 
     def _chamar_gemini_com_retry(self, modelo: str, conteudos: list, config_obj: types.GenerateContentConfig, max_tentativas: int = None):
         if max_tentativas is None:
@@ -447,7 +471,7 @@ Responde estritamente de acordo com o esquema JSON fornecido.
             resumo_executivo = "\n\n".join(seg.resumo_bloco for seg in segmentos_analisados if seg.resumo_bloco)
             takeaways_principais = desduplicar_strings(takeaways_fallback)[:10]
 
-        canon = _criar_canonicalizer()
+        canon = _criar_canonicalizer(self.vault_path)
 
         pessoas_canon = canon.canonicalizar_pessoas(todas_pessoas)
         artefactos_canon = canon.canonicalizar_artefactos(todos_artefactos)
@@ -567,7 +591,7 @@ DESCRIÇÃO ORIGINAL DO VÍDEO (RECURSOS, LINKS E TIMESTAMPS):
             raise ValueError("O Gemini não devolveu um resultado estruturado válido.")
 
         analise: AnaliseVideo = response.parsed
-        canon = _criar_canonicalizer()
+        canon = _criar_canonicalizer(self.vault_path)
 
         analise.pessoas = canon.canonicalizar_pessoas(analise.pessoas)
         analise.artefactos = canon.canonicalizar_artefactos(analise.artefactos)
@@ -705,7 +729,7 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         print(f"📁 Pasta de destino: Videos/{agenda.nome_conferencia}/")
         print(f"📋 Total de palestras a extrair: {total}\n")
 
-        canon = _criar_canonicalizer()
+        canon = _criar_canonicalizer(self.vault_path)
         palestras_processadas = []
 
         for idx, sessao in enumerate(agenda.sessoes, 1):
