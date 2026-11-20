@@ -6,6 +6,11 @@ import datetime
 import argparse
 from pathlib import Path
 from typing import Optional
+import logging
+from utils import configurar_logging
+
+
+logger = configurar_logging()
 
 # Garante suporte a UTF-8 no terminal Windows para emojis e acentos
 if hasattr(sys.stdout, "reconfigure"):

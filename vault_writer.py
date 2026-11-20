@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import Dict, Any, List, Set, Optional
 from models import AnaliseVideo, ObraCitada, PessoaMencionada, ArtefactoIA, AgendaScout, SessaoScout, PalestraAnalise
 import config
-from utils import eh_nome_valido_pessoa, eh_organizacao, verificar_link_ativo
+from utils import eh_nome_valido_pessoa, eh_organizacao, verificar_link_ativo, configurar_logging
+import logging
 
+logger = logging.getLogger("yt_obsidian")
 
 def limpar_nome_ficheiro(nome: str) -> str:
     """Remove caracteres inválidos para nomes de ficheiros no Windows e Obsidian."""
@@ -373,16 +375,16 @@ Link: {dados_video.get('url')}
                 novo_conteudo = self._inserir_antes_resenha(conteudo, bloco_novo)
                 if novo_conteudo is not None:
                     caminho_diario.write_text(novo_conteudo, encoding="utf-8")
-                    print(f"    ✓ Diário {data_leitura}.md atualizado com o bloco de metadados antes da resenha.\n")
+                    logger.info(f"    ✓ Diário {data_leitura}.md atualizado com o bloco de metadados antes da resenha.\n")
                     return
 
             # Caso contrário, acrescenta no fim do diário
             novo_conteudo = conteudo.rstrip() + f"\n\n{bloco_novo}\n"
             caminho_diario.write_text(novo_conteudo, encoding="utf-8")
-            print(f"    ✓ Diário {data_leitura}.md atualizado com o novo bloco de metadados.\n")
+            logger.info(f"    ✓ Diário {data_leitura}.md atualizado com o novo bloco de metadados.\n")
         else:
             caminho_diario.write_text(bloco_novo + "\n", encoding="utf-8")
-            print(f"    ✓ Diário {data_leitura}.md criado com o bloco de metadados.\n")
+            logger.info(f"    ✓ Diário {data_leitura}.md criado com o bloco de metadados.\n")
 
     # ------------------------------------------------------------------
     # Nota principal do vídeo
@@ -830,12 +832,12 @@ Link da Transmissão: {dados_video.get('url')}
                 novo_conteudo = self._inserir_antes_resenha(conteudo, bloco_novo)
                 if novo_conteudo is not None:
                     caminho_diario.write_text(novo_conteudo, encoding="utf-8")
-                    print(f"    ✓ {moc_wikilink} ({dia_rotulo}).md atualizado com o bloco de metadados antes da resenha.\n")
+                    logger.info(f"    ✓ {moc_wikilink} ({dia_rotulo}).md atualizado com o bloco de metadados antes da resenha.\n")
                     return
 
             novo_conteudo = conteudo.rstrip() + f"\n\n{bloco_novo}\n"
             caminho_diario.write_text(novo_conteudo, encoding="utf-8")
-            print(f"    ✓ Diário {data_leitura}.md atualizado com a conferência {moc_wikilink} ({dia_rotulo}).\n")
+            logger.info(f"    ✓ Diário {data_leitura}.md atualizado com a conferência {moc_wikilink} ({dia_rotulo}).\n")
         else:
             caminho_diario.write_text(bloco_novo + "\n", encoding="utf-8")
-            print(f"    ✓ Diário {data_leitura}.md criado com a conferência {moc_wikilink} ({dia_rotulo}).\n")
+            logger.info(f"    ✓ Diário {data_leitura}.md criado com a conferência {moc_wikilink} ({dia_rotulo}).\n")

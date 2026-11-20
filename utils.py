@@ -4,7 +4,56 @@ import urllib.error
 from typing import List, Optional
 import http.client
 
+import logging
+from pathlib import Path
+import config
 
+
+def _resolver_caminho_log(pasta_cofre: str | Path | None = None) -> Path:
+    """Resolve o ficheiro de registo dentro da pasta de logs do cofre indicado."""
+    base = Path(pasta_cofre) if pasta_cofre else Path(config.COFRE_PADRAO)
+    return base / "logs" / config.LIVRO_REGISTO
+
+
+def configurar_logging(
+    pasta_cofre: str | Path | None = None,
+    nivel_str: str = config.LOG_LEVEL,
+) -> logging.Logger:
+    """Configura ou reconfigura o logger partilhado para a pasta de logs do cofre."""
+    caminho_log = _resolver_caminho_log(pasta_cofre)
+    caminho_log.parent.mkdir(parents=True, exist_ok=True)
+
+    logger = logging.getLogger("yt_obsidian")
+    nivel = getattr(logging, str(nivel_str).upper(), logging.INFO)
+    logger.setLevel(nivel)
+    logger.propagate = False
+
+    formato_ficheiro = logging.Formatter(
+        "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
+    )
+    formato_consola = logging.Formatter("%(message)s")
+
+    # Garante um único StreamHandler para a consola
+    tem_consola = any(
+        isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+        for h in logger.handlers
+    )
+    if not tem_consola:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formato_consola)
+        logger.addHandler(console_handler)
+
+    # Substitui apenas o(s) FileHandler(s) anteriores pelo novo ficheiro do cofre
+    for handler in list(logger.handlers):
+        if isinstance(handler, logging.FileHandler):
+            handler.close()
+            logger.removeHandler(handler)
+
+    file_handler = logging.FileHandler(caminho_log, mode="a", encoding="utf-8")
+    file_handler.setFormatter(formato_ficheiro)
+    logger.addHandler(file_handler)
+
+    return logger
 
 def verificar_link_ativo(url: str, timeout: float = 3.5) -> bool:
     """Verifica de forma leve se um URL responde com sucesso (200-399)."""

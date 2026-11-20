@@ -12,6 +12,12 @@ PASTA_TEMAS = "Temas"
 PASTA_ARTEFACTOS = "Artefactos"
 PASTA_ORGANIZACOES = "Organizações"
 
+COFRE_PADRAO = Path(DEFAULT_VAULT_PATH)
+
+
+LIVRO_REGISTO = COFRE_PADRAO / "logs" / "yt_obsidian.log"
+LOG_LEVEL = "INFO"
+
 # Subtipos válidos para artefactos (usado para normalização defensiva)
 SUBTIPOS_ARTEFACTO = {
     "modelo", "framework", "ferramenta", "agente",
@@ -75,3 +81,4 @@ GEMINI_BACKOFF_BASE_503 = float(os.environ.get("GEMINI_BACKOFF_BASE_503", 5.0))
 
 # Se True, tenta ler o header Retry-After da resposta e respeitá-lo.
 GEMINI_RESPEITAR_RETRY_AFTER = os.environ.get("GEMINI_RESPEITAR_RETRY_AFTER", "1") == "1"
+
