@@ -225,9 +225,15 @@ class VideoAnalyzer:
         """Chama o Gemini com retry no modelo indicado e faz fallback se este falhar."""
         try:
             return self._chamar_gemini_com_retry(modelo, conteudos, config_obj)
-        except Exception:
+        except Exception as e_principal:
             if self.fallback_model and self.fallback_model != modelo:
-                return self._chamar_gemini_com_retry(self.fallback_model, conteudos, config_obj)
+                try:
+                    return self._chamar_gemini_com_retry(self.fallback_model, conteudos, config_obj)
+                except Exception as e_fallback:
+                    raise RuntimeError(
+                        f"Modelo principal '{modelo}' falhou: {e_principal}. "
+                        f"Fallback '{self.fallback_model}' também falhou: {e_fallback}"
+                    ) from e_principal
             raise
 
     def _preparar_contexto_scout(self, dados_video: Dict[str, Any]) -> str:
