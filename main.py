@@ -329,7 +329,7 @@ def menu_interativo(vault_path: str) -> None:
         print("🧠 YOUTUBE TO OBSIDIAN KNOWLEDGE GRAPH")
         print("=" * 50)
         print(f"📂 Cofre Atual: {os.path.abspath(vault_path)}")
-        print("1. Processar 1 vídeo por URL")
+        print("1. Processar 1 vídeo por URL (respeita histórico)")
         print("2. Processar lista de vídeos (lista_de_videos.txt)")
         print("3. Processar outro ficheiro de links")
         print("4. Mudar pasta do Vault do Obsidian")
@@ -343,13 +343,35 @@ def menu_interativo(vault_path: str) -> None:
         if opcao == "1":
             url = input("\nCola o link do YouTube: ").strip()
             if url:
-                processar_um_video(url, extrator, analyzer, writer, forcar=True, vault_path=vault_path)
+                forcar_video = False
+                video_id = extrair_id_youtube(url)
+                if video_id:
+                    caminho_hist = _resolver_caminho_historico(vault_path)
+                    historico = carregar_historico(caminho_hist)
+                    if video_id in historico:
+                        titulo_antigo = historico[video_id].get("titulo", "Vídeo")
+                        resp = input(
+                            f"'{titulo_antigo}' já está no histórico. Reprocessar mesmo assim? [s/N]: "
+                        ).strip().lower()
+                        forcar_video = resp in ("s", "sim")
+                processar_um_video(
+                    url,
+                    extrator,
+                    analyzer,
+                    writer,
+                    vault_path=vault_path,
+                    forcar=forcar_video,
+                )
         elif opcao == "2":
-            processar_ficheiro_lista("lista_de_videos.txt", extrator, analyzer, writer, vault_path=vault_path)
+            processar_ficheiro_lista(
+                "lista_de_videos.txt", extrator, analyzer, writer, vault_path=vault_path
+            )
         elif opcao == "3":
             caminho = input("\nNome do ficheiro de texto: ").strip()
             if caminho:
-                processar_ficheiro_lista(caminho, extrator, analyzer, writer, vault_path=vault_path)
+                processar_ficheiro_lista(
+                    caminho, extrator, analyzer, writer, vault_path=vault_path
+                )
         elif opcao == "4":
             novo_vault = input("\nNovo caminho para a pasta do teu Vault do Obsidian: ").strip()
             if novo_vault:
@@ -373,7 +395,6 @@ def menu_interativo(vault_path: str) -> None:
             break
         else:
             print("Opção inválida.")
-
 
 def main() -> None:
     global logger
