@@ -647,7 +647,6 @@ Responde estritamente de acordo com o esquema JSON fornecido.
 
     def analisar_palestra(
         self,
-        dados_video: Dict[str, Any],
         agenda: AgendaScout,
         sessao: SessaoScout,
         texto_palestra: str,
@@ -745,7 +744,7 @@ Responde estritamente de acordo com o esquema JSON fornecido.
                 print(f"      ⚠️ Aviso: Transcrição vazia para a sessão #{sessao.ordem}. A avançar...")
                 continue
 
-            analise_palestra = self.analisar_palestra(dados_video, agenda, sessao, texto_fatia, canon)
+            analise_palestra = self.analisar_palestra(agenda, sessao, texto_fatia, canon)
 
             caminho_nota = writer.salvar_palestra_conferencia(dados_video, agenda, sessao, analise_palestra, data_leitura)
             palestras_processadas.append({
