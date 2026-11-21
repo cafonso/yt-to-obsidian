@@ -203,6 +203,7 @@ def processar_ficheiro_lista(
     analyzer: VideoAnalyzer,
     writer: ObsidianVaultWriter,
     forcar: bool = False,
+    modo_conferencia: Optional[str] = None,
     vault_path: Optional[str | Path] = None,
 ) -> None:
     caminho = Path(caminho_lista)
@@ -267,6 +268,7 @@ def processar_ficheiro_lista(
             writer,
             forcar=forcar,
             data_leitura=data_leitura,
+            modo_conferencia=modo_conferencia,
             vault_path=vault_path,
         ):
             sucessos += 1
@@ -414,6 +416,7 @@ def main() -> None:
             writer,
             forcar=args.forcar,
             vault_path=args.vault,
+            modo_conferencia=modo_conf,
         )
     else:
         menu_interativo(args.vault)
