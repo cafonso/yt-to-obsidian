@@ -741,6 +741,12 @@ Responde estritamente de acordo com o esquema JSON fornecido.
     ) -> str:
         """Processa todas as palestras detetadas pelo Scout e gera as notas atómicas + MOC na subpasta dedicada."""
         blocos = dados_video.get("transcricao_blocos") or []
+        if not blocos:
+            raise ValueError(
+                "Não é possível processar conferência sem transcrição de texto. "
+                "O modo conferência requer legendas do YouTube."
+            )
+        dia_rotulo = agenda.dia_rotulo or f"Dia {agenda.dia or 1}"
         dia_rotulo = agenda.dia_rotulo or f"Dia {agenda.dia or 1}"
         total = len(agenda.sessoes)
 
