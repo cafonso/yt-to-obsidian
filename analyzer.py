@@ -413,7 +413,7 @@ CONTEXTO GLOBAL DO VÍDEO:
             todas_obras.extend(seg.obras)
             todas_orgs.extend(seg.organizacoes)
             todos_artefactos.extend(seg.artefactos)
-            todas_temas.extend(seg.temas)
+            todos_temas.extend(seg.temas)
             todas_metricas.extend(seg.metricas_e_numeros)
             todas_tensoes.extend(seg.tensoes_e_riscos)
             todas_agendas.extend(seg.agenda_e_previsoes)
