@@ -14,6 +14,30 @@ import unicodedata
 from pathlib import Path
 
 
+_CODIGOS_OU_TOKENS_TRANSITORIOS = (
+    "500",
+    "internal",
+    "503",
+    "unavailable",
+    "504",
+    "429",
+    "resource_exhausted",
+    "deadlineexceeded",
+    "deadline exceeded",
+    "timed out",
+    "timeout",
+)
+
+
+def _eh_erro_transitorio(exc: Exception, quota_diaria: bool = False) -> bool:
+    if quota_diaria:
+        return False
+
+    texto = f"{type(exc).__name__} {exc}".lower()
+    return any(token in texto for token in _CODIGOS_OU_TOKENS_TRANSITORIOS)
+    
+
+
 INSTRUCOES_EXTRACAO_COMUNS = """
 INSTRUÇÕES ESPECÍFICAS DE EXTRAÇÃO:
 0. REGRA ESTRITA DE IDIOMAS E TÍTULOS (MUITO IMPORTANTE):
@@ -184,19 +208,9 @@ class VideoAnalyzer:
                     or "per day" in erro_str.lower()
                     or "GenerateRequestsPerDay" in erro_str
                 )
-                transitorio = (
-                    not quota_diaria
-                    and (
-                        "503" in erro_str
-                        or "UNAVAILABLE" in erro_str
-                        or "429" in erro_str
-                        or "RESOURCE_EXHAUSTED" in erro_str
-                        or "timeout" in erro_str.lower()
-                        or "timed out" in erro_str.lower()
-                    )
-                )
+                transitorio = _eh_erro_transitorio(e, quota_diaria=quota_diaria)
                 if not transitorio or tentativa >= max_tentativas:
-                    raise e
+                    raise
 
                 espera = _calcular_espera(tentativa, erro_str)
                 print(
