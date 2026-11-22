@@ -28,6 +28,11 @@ O projeto utiliza `pyproject.toml` (padrão PEP 621) gerido nativamente pelo `uv
 ```bash
 uv sync
 ```
+### Instalar também a interface web (Streamlit)
+
+```bash
+uv sync --extra ui
+```
 
 ### 1. Abrir o Menu Interativo
 
@@ -91,7 +96,7 @@ uv run pytest
 ├── analyzer.py          # Comunicação com Gemini, retries/backoff, Map-Reduce e Scout
 ├── canonicalizer.py     # Resolução determinística e fuzzy match de entidades
 ├── config.py            # Configurações centralizadas e thresholds
-├── extractor.py         # Extração de metadados, legendas e fatiamento via yt-dlp/ffmpeg
+├── extrator.py         # Extração de metadados, legendas e fatiamento via yt-dlp/ffmpeg
 ├── main.py              # CLI, menu interativo e orquestração do pipeline
 ├── models.py            # Esquemas Pydantic para Structured Outputs
 ├── README.md            # Documentação do projeto
@@ -99,10 +104,17 @@ uv run pytest
 ├── vault_writer.py      # Escrita estruturada de notas, validação de links e diários
 ├── pyproject.toml       # Configuração do projeto, dependências e pytest
 ├── scripts/             # Utilitários auxiliares fora do pipeline principal
-│   ├── listar_modelos.py
-│   └── resumir_projecto.py
+│   └── listar-modelos.py
 └── tests/               # Testes unitários e de integração
+    ├── __init__.py
+    ├── test_app.py
+    ├── test_cofre.py
+    ├── test_conferencia_sem_blocos.py
+    ├── test_fallback.py
+    ├── test_main_lista_split.py
+    ├── test_main_menu_opcao1.py
     ├── test_pkm.py
+    ├── test_retry_transitorio.py
     └── test_vault_writer.py
 ```
 
@@ -110,5 +122,8 @@ uv run pytest
 
 - `Videos/` (e subpastas por conferência com respetivo MOC)
 - `Pessoas/`, `Organizações/`, `Livros/`, `Temas/`, `Artefactos/`
-- `.canonicalizacao/` (`aliases.yaml`, `decisoes.jsonl`, `revisao.md`)
+- `.canonicalizacao/` — estado por cofre, gerado automaticamente:
+  - `aliases.yaml` — dicionário de aliases (aprendido ao longo do tempo)
+  - `decisoes.jsonl` — auditoria de cada fusão
+  - `revisao.md` — pares ambíguos para confirmação manual
 - `YYYY-MM-DD.md` (Notas diárias)

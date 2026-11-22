@@ -8,6 +8,8 @@ tipo: pessoa
 tags:
   - pessoa
 aliases: []
+obras:
+  - "[[obra_1]]"
 ---
 # {pessoa.nome}
 
@@ -15,7 +17,6 @@ aliases: []
 
 ### 📚 Obras Relacionadas:
 - [[obra_1]]
-- [[obra_2]]
 
 ### 📹 Mencionada nos Vídeos:
 - {video_link}
@@ -29,12 +30,13 @@ tipo: organizacao
 tags:
   - organizacao
 aliases: []
+artefactos:
+  - "[[Artefacto 1]]"
 ---
 # {nome}
 
 ### 🧩 Artefactos:
 - [[Artefacto 1]]
-- [[Artefacto 2]]
 
 ### 📹 Mencionada nos Vídeos:
 - {video_link}
@@ -45,7 +47,8 @@ aliases: []
 ```yaml
 ---
 tipo: {obra.tipo.lower()}
-autores: {autores_links}
+autores:
+  - "[[Autor 1]]"
 tags:
   - {obra.tipo.lower()}
 ---
@@ -80,14 +83,14 @@ tags:
 ---
 tipo: artefacto
 subtipo: {subtipo}
-fabricante: {fabricante_link}
+fabricante: "[[Fabricante]]"
 tags:
   - artefacto/{subtipo}
 ---
 # {artefacto.nome}
 
 **Subtipo:** {subtipo}  
-**Fabricante/Autor:** {fabricante_link or "Desconhecido"}
+**Fabricante/Autor:** [[Fabricante]]
 
 > {artefacto.descricao}
 
