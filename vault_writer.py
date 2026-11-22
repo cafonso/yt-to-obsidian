@@ -313,6 +313,16 @@ class ObsidianVaultWriter:
         autores_links = [f"[[{limpar_nome_ficheiro(a)}]]" for a in obra.autores]
         autores_str = ", ".join(autores_links) if autores_links else "Não especificado"
         tipo_lower = (obra.tipo or "livro").strip().lower()
+        
+        autores_limpos: list[str] = []
+        for autor in obra.autores or []:
+            autor_limpo = (autor or "").strip()
+            if autor_limpo and autor_limpo.lower() not in {a.lower() for a in autores_limpos}:
+                autores_limpos.append(autor_limpo)
+
+        autores_links = [f"[[{limpar_nome_ficheiro(a)}]]" for a in autores_limpos]
+        autores_str = ", ".join(autores_links) if autores_links else "Não especificado"
+        tipo_lower = (obra.tipo or "livro").strip().lower()
 
         if not caminho.exists():
             contexto_str = f"{_sanitizar_blockquote(obra.contexto)}\n\n" if obra.contexto else ""
@@ -339,7 +349,7 @@ class ObsidianVaultWriter:
             )
             caminho.write_text(conteudo_atual, encoding="utf-8")
 
-        for autor in obra.autores:
+        for autor in autores_limpos:
             autor_pessoa = PessoaMencionada(
                 nome=autor,
                 papel_ou_bio=f"Autor(a) da obra [[{limpar_nome_ficheiro(obra.titulo)}]].",

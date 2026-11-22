@@ -7,9 +7,9 @@ import streamlit as st
 
 import config
 from extrator import YouTubeExtractor, extrair_id_youtube
-from analyzer import VideoAnalyzer
+from analyzer import VideoAnalyzer, _resolver_caminhos_canonicalizacao
 from vault_writer import ObsidianVaultWriter
-from main import processar_um_video, carregar_historico
+from main import processar_um_video, carregar_historico, _resolver_caminho_historico
 
 st.set_page_config(
     page_title="YouTube → Obsidian PKM",
@@ -158,6 +158,7 @@ with tab_processar:
                             forcar=forcar,
                             data_leitura=data_leitura.isoformat(),
                             modo_conferencia=modo_conferencia,
+                            vault_path=vault_path,
                         )
                         if ok:
                             sucessos += 1
@@ -175,7 +176,8 @@ with tab_processar:
 # ABA 2: REVISÃO DE CANONICALIZAÇÃO (revisao.md)
 # ------------------------------------------------------------------------------
 with tab_revisao:
-    caminho_rev = Path(config.REVISAO_PATH)
+    _, _, revisao_path = _resolver_caminhos_canonicalizacao(vault_path)
+    caminho_rev = Path(revisao_path)
     st.caption(f"Ficheiro monitorizado: `{caminho_rev.resolve()}`")
 
     if st.button("🔄 Atualizar lista de revisão"):
@@ -195,9 +197,10 @@ with tab_revisao:
 # ABA 3: HISTÓRICO DE VÍDEOS PROCESSADOS
 # ------------------------------------------------------------------------------
 with tab_historico:
-    historico = carregar_historico()
+    caminho_hist = _resolver_caminho_historico(vault_path)
+    historico = carregar_historico(caminho_hist)
     if not historico:
-        st.info("Ainda não existem vídeos registados em `historico_processados.json`.")
+        st.info(f"Ainda não existem vídeos registados em `{caminho_hist.name}`.")
     else:
         st.metric("Total de Vídeos/Conferências Integrados", len(historico))
         registos = [
