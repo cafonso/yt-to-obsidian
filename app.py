@@ -3,6 +3,8 @@ import os
 import sys
 import datetime
 from pathlib import Path
+from contextlib import redirect_stdout
+
 import streamlit as st
 
 import config
@@ -142,11 +144,8 @@ with tab_processar:
                 writer = ObsidianVaultWriter(vault_path, validar_links=validar_links)
 
                 stream_logs = StreamlitLogStream(log_area)
-                stdout_original = sys.stdout
                 sucessos = 0
-
-                try:
-                    sys.stdout = stream_logs
+                with redirect_stdout(stream_logs):     # ← NOVO (substitui try/finally + sys.stdout)
                     total = len(urls_validos)
                     for idx, url in enumerate(urls_validos, 1):
                         status_box.info(f"A processar [{idx}/{total}]: `{url}`")
@@ -163,9 +162,8 @@ with tab_processar:
                         if ok:
                             sucessos += 1
                         barra.progress(idx / total, text=f"Concluído {idx}/{total} vídeos")
-                finally:
-                    sys.stdout = stdout_original
 
+                
                 if sucessos == len(urls_validos):
                     status_box.success(f"🎉 Concluído! {sucessos}/{len(urls_validos)} vídeos integrados no Obsidian.")
                 else:

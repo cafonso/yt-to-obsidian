@@ -44,7 +44,10 @@ class YouTubeExtractor:
             'quiet': True,
             'no_warnings': True,
             'skip_download': True,
-            'extract_flat': False
+            'extract_flat': False,
+            'noprogress': True,        # ← NOVO
+            'logger': None,            # ← NOVO
+            'progress_hooks': [],      # ← NOVO
         }
         if os.path.exists("cookies.txt"):
             opcoes['cookiefile'] = "cookies.txt"
@@ -178,6 +181,9 @@ class YouTubeExtractor:
             'outtmpl': caminho_audio,
             'quiet': True,
             'no_warnings': True,
+            'noprogress': True,        # ← NOVO: sem barra de progresso
+            'logger': None,            # ← NOVO: sem logger custom
+            'progress_hooks': [],      # ← NOVO: sem hooks
         }
         if os.path.exists("cookies.txt"):
             opcoes['cookiefile'] = "cookies.txt"
