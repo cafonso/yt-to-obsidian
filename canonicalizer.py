@@ -365,6 +365,7 @@ class Canonicalizer:
     # API por tipo — obras
     # ------------------------------------------------------------------
 
+
     def canonicalizar_obras(self, obras: List[ObraCitada]) -> List[ObraCitada]:
         grupos: Dict[str, ObraCitada] = {}
         for o in obras:
@@ -375,17 +376,34 @@ class Canonicalizer:
                 continue
             self._registar_fusao("obra", canonical, o.titulo, decisao)
 
+            # NOVO: canonicalizar autores via o mesmo resolvedor de pessoas
+            autores_canon: List[str] = []
+            for autor in (o.autores or []):
+                if not autor or not autor.strip():
+                    continue
+                autor_canon, _ = self._resolver("pessoa", autor.strip())
+                if autor_canon:
+                    autores_canon.append(autor_canon)
+
+            # Dedup preservando ordem
+            vistos = set()
+            autores_final = []
+            for a in autores_canon:
+                if a not in vistos:
+                    vistos.add(a)
+                    autores_final.append(a)
+
             if canonical not in grupos:
                 grupos[canonical] = ObraCitada(
                     titulo=canonical,
                     tipo=o.tipo,
-                    autores=list(o.autores or []),
+                    autores=autores_final,
                     contexto=o.contexto,
                 )
             else:
                 atual = grupos[canonical]
-                if not atual.autores and o.autores:
-                    atual.autores = list(o.autores)
+                if not atual.autores and autores_final:
+                    atual.autores = autores_final
                 if not atual.contexto and o.contexto:
                     atual.contexto = o.contexto
         return list(grupos.values())

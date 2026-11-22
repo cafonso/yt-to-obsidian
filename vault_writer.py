@@ -304,23 +304,12 @@ class ObsidianVaultWriter:
     # ------------------------------------------------------------------
     # Obras
     # ------------------------------------------------------------------
-
     def salvar_ou_atualizar_obra(self, obra: ObraCitada, video_link: str):
         """Cria ou atualiza a nota de um livro ou artigo conectando aos autores e vídeos."""
         nome_ficheiro = f"{limpar_nome_ficheiro(obra.titulo)}.md"
         caminho = self.pasta_livros / nome_ficheiro
 
-        autores_links = [f"[[{limpar_nome_ficheiro(a)}]]" for a in obra.autores]
-        autores_str = ", ".join(autores_links) if autores_links else "Não especificado"
-        tipo_lower = (obra.tipo or "livro").strip().lower()
-        
-        autores_limpos: list[str] = []
-        for autor in obra.autores or []:
-            autor_limpo = (autor or "").strip()
-            if autor_limpo and autor_limpo.lower() not in {a.lower() for a in autores_limpos}:
-                autores_limpos.append(autor_limpo)
-
-        autores_links = [f"[[{limpar_nome_ficheiro(a)}]]" for a in autores_limpos]
+        autores_links = [f"[[{limpar_nome_ficheiro(a)}]]" for a in (obra.autores or [])]
         autores_str = ", ".join(autores_links) if autores_links else "Não especificado"
         tipo_lower = (obra.tipo or "livro").strip().lower()
 
@@ -349,13 +338,12 @@ class ObsidianVaultWriter:
             )
             caminho.write_text(conteudo_atual, encoding="utf-8")
 
-        for autor in autores_limpos:
+        for autor in (obra.autores or []):
             autor_pessoa = PessoaMencionada(
                 nome=autor,
                 papel_ou_bio=f"Autor(a) da obra [[{limpar_nome_ficheiro(obra.titulo)}]].",
             )
             self.salvar_ou_atualizar_pessoa(autor_pessoa, video_link, [obra.titulo])
-
     # ------------------------------------------------------------------
     # Temas
     # ------------------------------------------------------------------

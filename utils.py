@@ -134,12 +134,79 @@ def eh_organizacao(nome: str) -> bool:
     return False
 
 
+# Palavras que, quando compõem a totalidade de um nome, indicam um conceito
+# técnico e não uma pessoa. Usadas por `eh_nome_valido_pessoa` para rejeitar
+# falsos positivos como "Large Language Model" ou "Mixture of Experts".
+PALAVRAS_CONCEITO_TECNICO = {
+    # Conceitos gerais de IA/ML
+    "model", "models", "language", "languages", "learning", "network", "networks",
+    "generation", "generative", "augmented", "retrieval", "transformer", "transformers",
+    "attention", "embedding", "embeddings", "agent", "agents", "agentic",
+    "prompt", "prompts", "prompting", "context", "contexts", "reasoning",
+    "training", "inference", "tuning", "finetuning", "fine-tuning",
+    "mixture", "experts", "expert", "chain", "thought", "thoughts",
+    "deep", "reinforcement", "supervised", "unsupervised",
+    "large", "small", "medium", "vision", "multimodal", "text", "image", "audio",
+    "video", "speech", "code", "coding", "programming", "software", "hardware",
+    "data", "dataset", "datasets", "token", "tokens", "tokenizer", "tokenization",
+    "layer", "layers", "neural", "graph", "graphs", "vector", "vectors",
+    "database", "search", "memory", "state", "pipeline", "workflow",
+    "orchestration", "framework", "stack", "protocol", "api", "apis",
+    "endpoint", "endpoints", "safety", "alignment", "interpretability",
+    "evaluation", "benchmark", "throughput", "latency", "scaling", "scale",
+    "quantization", "distillation", "pruning", "sparsity", "efficiency",
+    "performance", "optimization", "gradient", "loss", "backpropagation",
+    "epoch", "batch", "parameter", "parameters", "weights", "bias",
+    "activation", "dropout", "convolution", "recurrent", "sequence",
+    "diffusion", "autoencoder", "gan", "vae", "rlhf", "dpo", "sft",
+    "lora", "qlora", "peft", "adapter", "adapters",
+    "in-context", "few-shot", "zero-shot", "one-shot",
+    "cot", "scratchpad", "reflection", "critique", "planning",
+    "tool", "tools", "tool-use", "function", "functions", "calling",
+    "mcp", "rag", "reranking", "rerank", "chunking", "chunk", "chunks",
+    "semantic", "lexical", "hybrid", "dense", "sparse",
+    "knowledge", "execution", "action", "actions", "observation",
+    "observations", "reward", "rewards", "policy", "policies",
+    "environment", "environments", "simulation", "simulations",
+    # Conectores comuns que aparecem em conceitos técnicos
+    "of", "the", "and", "or", "for", "in", "on", "with", "via", "to", "from",
+}
+
+
 def eh_nome_valido_pessoa(nome: str) -> bool:
-    """Valida se o nome parece um nome de pessoa real (Nome + Apelido) e não uma organização."""
+    """
+    Valida se o nome parece um nome de pessoa real (Nome + Apelido) e não
+    uma organização ou um conceito técnico.
+
+    Heurísticas aplicadas, por ordem:
+      1. Tem de ter ≥ 2 palavras.
+      2. Não pode ser uma organização (via `eh_organizacao`).
+      3. Todas as palavras não podem ser conceitos técnicos (via
+         `PALAVRAS_CONCEITO_TECNICO`), o que rejeita "Large Language Model",
+         "Mixture of Experts", "Chain of Thought", etc.
+         A capitalização NÃO é usada como critério — nomes de pessoas podem
+         vir em minúsculas de transcrições ASR.
+    """
     nome_limpo = nome.strip()
     if not nome_limpo:
         return False
+
     partes = [p for p in nome_limpo.split() if p]
     if len(partes) < 2:
         return False
-    return not eh_organizacao(nome_limpo)
+
+    if eh_organizacao(nome_limpo):
+        return False
+
+    # Se todas as palavras (normalizadas) são conceitos técnicos ou
+    # conectores, não é uma pessoa.
+    palavras_norm = {
+        re.sub(r"[^a-z0-9\-]", "", p.lower())
+        for p in partes
+        if p
+    }
+    palavras_norm.discard("")
+    if palavras_norm and palavras_norm.issubset(PALAVRAS_CONCEITO_TECNICO):
+        return False
+
+    return True
