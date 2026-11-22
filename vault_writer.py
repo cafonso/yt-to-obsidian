@@ -1,57 +1,136 @@
-import os
-import re
 import asyncio
+import concurrent.futures
 import datetime
-from pathlib import Path
-from typing import Dict, Any, List, Set, Optional
-from models import AnaliseVideo, ObraCitada, PessoaMencionada, ArtefactoIA, AgendaScout, SessaoScout, PalestraAnalise
-import config
-from utils import eh_nome_valido_pessoa, eh_organizacao, verificar_link_ativo, configurar_logging
 import logging
+import re
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import config
+from models import (
+    AgendaScout,
+    AnaliseVideo,
+    ArtefactoIA,
+    ObraCitada,
+    PalestraAnalise,
+    PessoaMencionada,
+    SessaoScout,
+)
+from utils import (
+    eh_nome_valido_pessoa,
+    eh_organizacao,
+    verificar_link_ativo,
+)
 
 logger = logging.getLogger("yt_obsidian")
 
+_RESERVADOS_WINDOWS = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *{f"COM{i}" for i in range(1, 10)},
+    *{f"LPT{i}" for i in range(1, 10)},
+}
+
+
+def _escapar_yaml_str(valor: Any) -> str:
+    """Escapa aspas e quebras de linha para valores em aspas duplas no YAML."""
+    texto = "" if valor is None else str(valor)
+    return texto.replace("\\", "\\\\").replace('"', '\\"').replace("\r\n", " ").replace("\n", " ")
+
+
+def _yaml_lista(chave: str, valores: List[str], indent: int = 0) -> str:
+    """Gera uma lista em bloco YAML (`chave: []` se vazia) para evitar `[[[X]]]`."""
+    prefixo = " " * indent
+    if not valores:
+        return f"{prefixo}{chave}: []\n"
+    linhas = [f"{prefixo}{chave}:"]
+    for v in valores:
+        linhas.append(f'{prefixo}  - "{_escapar_yaml_str(v)}"')
+    return "\n".join(linhas) + "\n"
+
+
+def _sanitizar_blockquote(texto: Optional[str]) -> str:
+    """Garante que blocos de citação multi-linha mantêm `> ` sem duplicar prefixos."""
+    if not texto:
+        return ""
+    linhas = []
+    for linha in str(texto).splitlines():
+        linha_limpa = linha.lstrip()
+        if linha_limpa.startswith(">"):
+            linha_limpa = linha_limpa[1:].lstrip()
+        linhas.append(f"> {linha_limpa}" if linha_limpa else ">")
+    return "\n".join(linhas)
+
+
+def _correr_async(coro):
+    """Executa uma coroutine de forma segura mesmo com um event loop ativo."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    def _runner():
+        return asyncio.run(coro)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(_runner).result()
+
+
 def limpar_nome_ficheiro(nome: str) -> str:
-    """Remove caracteres inválidos para nomes de ficheiros no Windows e Obsidian."""
-    # Substitui caracteres proibidos no Windows: < > : " / \ | ? *
-    nome_limpo = re.sub(r'[<>:"/\\|?*]', '', nome)
-    # Remove múltiplos espaços
-    nome_limpo = re.sub(r'\s+', ' ', nome_limpo).strip()
-    return nome_limpo[:120]
+    """Remove caracteres inválidos e normaliza nomes de ficheiros no Windows e Obsidian."""
+    nome_limpo = re.sub(r'[<>:"/\\|?*]', "", nome or "")
+    nome_limpo = re.sub(r"\s+", " ", nome_limpo).strip()
+    nome_limpo = nome_limpo.rstrip(" .")
+    if nome_limpo.upper() in _RESERVADOS_WINDOWS:
+        nome_limpo = f"_{nome_limpo}"
+    return (nome_limpo[:120]).rstrip(" .") or "Nota"
 
 
-
-
-
-async def _validar_lista_recursos_async(recursos: List[str], timeout: float = 3.5) -> List[str]:
-    """Verifica todos os links da lista em paralelo e sinaliza os que estiverem inativos."""
+async def _validar_lista_recursos_async(
+    recursos: List[str],
+    timeout: float = 3.5,
+    max_concorrencia: int = 10,
+) -> List[str]:
+    """Verifica todos os URLs de cada recurso em paralelo com limite de concorrência."""
     if not recursos:
         return []
+
+    semaforo = asyncio.Semaphore(max_concorrencia)
+
+    async def _validar_url(url: str) -> bool:
+        async with semaforo:
+            try:
+                return await asyncio.to_thread(verificar_link_ativo, url, timeout)
+            except Exception:
+                return False
 
     async def processar_item(recurso: str) -> str:
         urls = re.findall(r"https?://[^\s\]\)]+", recurso)
         if not urls:
             return recurso
 
-        # Limpa eventual pontuação final presa ao URL (ex.: ponto final ou vírgula)
-        url_alvo = urls[0].rstrip(".,;:")
-        ativo = await asyncio.to_thread(verificar_link_ativo, url_alvo, timeout)
-
-        if ativo:
+        urls_limpos = [u.rstrip(".,;:") for u in urls]
+        resultados = await asyncio.gather(*(_validar_url(u) for u in urls_limpos))
+        if all(resultados):
             return recurso
-        return f"{recurso} ⚠️ *(Link possivelmente inativo ou inacessível)*"
 
-    tarefas = [processar_item(r) for r in recursos]
-    return await asyncio.gather(*tarefas)
+        inativos = [u for u, ok in zip(urls_limpos, resultados) if not ok]
+        sufixo = " ⚠️ *(Link possivelmente inativo: " + ", ".join(inativos) + ")*"
+        return f"{recurso}{sufixo}"
+
+    return await asyncio.gather(*(processar_item(r) for r in recursos))
+
 
 def validar_recursos_externos(recursos: List[str], ativar: bool = True) -> List[str]:
-    """Ponto de entrada síncrono para validar recursos de forma assíncrona em paralelo."""
+    """Ponto de entrada síncrono para validar links externos de forma segura."""
     if not recursos or not ativar:
         return recursos
     try:
-        return asyncio.run(_validar_lista_recursos_async(recursos))
-    except Exception:
-        # Em caso de falha inesperada no loop assíncrono, devolve os recursos originais sem quebrar o fluxo
+        return _correr_async(_validar_lista_recursos_async(recursos))
+    except Exception as exc:
+        logger.warning("Validação de links falhou, a devolver originais: %s", exc)
         return recursos
 
 
@@ -66,50 +145,49 @@ class ObsidianVaultWriter:
         self.pasta_artefactos = self.vault_path / config.PASTA_ARTEFACTOS
         self.pasta_organizacoes = self.vault_path / config.PASTA_ORGANIZACOES
 
-        # Garante que as subpastas existem no Vault
         for pasta in [
-            self.pasta_videos, self.pasta_pessoas, self.pasta_livros,
-            self.pasta_temas, self.pasta_artefactos, self.pasta_organizacoes,
+            self.pasta_videos,
+            self.pasta_pessoas,
+            self.pasta_livros,
+            self.pasta_temas,
+            self.pasta_artefactos,
+            self.pasta_organizacoes,
         ]:
             pasta.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
     # Helpers internos
     # ------------------------------------------------------------------
+
     def _inserir_antes_resenha(self, conteudo: str, bloco_novo: str) -> str | None:
-        """Insere bloco_novo antes da secção '# Resenha do dia' sem interpretar sequências de regex."""
+        """Insere bloco_novo antes da secção '# Resenha do dia' preservando separadores anteriores."""
         match = re.search(r"(#\s+Resenha do [Dd]ia)", conteudo)
         if not match:
             return None
 
         idx = match.start()
-        antes = conteudo[:idx].rstrip()
+        antes = conteudo[:idx].rstrip("\n")
         resenha = conteudo[idx:]
         if antes:
             return f"{antes}\n\n{bloco_novo}\n\n{resenha}"
         return f"{bloco_novo}\n\n{resenha}"
+
     def _adicionar_link_se_nao_existir(self, conteudo: str, seccao_titulo: str, novo_link: str) -> str:
-        """Adiciona um item a uma secção do markdown se ele ainda não estiver presente."""
+        """Adiciona um item a uma secção do Markdown se ele ainda não estiver presente."""
         if novo_link in conteudo:
             return conteudo
 
         if seccao_titulo in conteudo:
             padrao = re.escape(seccao_titulo) + r"\n+"
-            substituicao = f"{seccao_titulo}\n- {novo_link}\n"
+            substituicao = lambda _m: f"{seccao_titulo}\n- {novo_link}\n"
             novo_conteudo, count = re.subn(padrao, substituicao, conteudo, count=1)
             if count > 0:
                 return novo_conteudo
 
-        # Se a secção não existir no ficheiro, acrescenta no fim
         return conteudo.rstrip() + f"\n\n{seccao_titulo}\n- {novo_link}\n"
 
     def _ligar_fabricante(self, fabricante: str, artefacto_nome: str, video_link: str):
-        """
-        Cria a nota adequada para o fabricante de um artefacto:
-          - Se for organização -> nota em Organizações/
-          - Se for pessoa     -> nota em Pessoas/
-          - Caso contrário    -> não cria nada (link fica órfão, resolvido quando o user criar a nota)
-        """
+        """Cria ou atualiza a nota adequada para o fabricante de um artefacto."""
         if not fabricante or not fabricante.strip():
             return
         fabricante = fabricante.strip()
@@ -140,31 +218,34 @@ class ObsidianVaultWriter:
         caminho = self.pasta_pessoas / nome_ficheiro
 
         if not caminho.exists():
-            conteudo = f"""---
-tipo: pessoa
-tags:
-  - pessoa
-aliases: []
----
-# {pessoa.nome}
-
-> {pessoa.papel_ou_bio}
-
-### 📚 Obras Relacionadas:
-"""
+            bio = _sanitizar_blockquote(pessoa.papel_ou_bio) or ">"
+            obras_yaml = _yaml_lista("obras", [f"[[{limpar_nome_ficheiro(o)}]]" for o in obras])
+            conteudo = (
+                "---\n"
+                "tipo: pessoa\n"
+                "tags:\n"
+                "  - pessoa\n"
+                "aliases: []\n"
+                f"{obras_yaml}"
+                "---\n"
+                f"# {pessoa.nome}\n\n"
+                f"{bio}\n\n"
+                "### 📚 Obras Relacionadas:\n"
+            )
             for obra in obras:
                 conteudo += f"- [[{limpar_nome_ficheiro(obra)}]]\n"
 
-            conteudo += f"""
-### 📹 Mencionada nos Vídeos:
-- {video_link}
-"""
+            conteudo += f"\n### 📹 Mencionada nos Vídeos:\n- {video_link}\n"
             caminho.write_text(conteudo, encoding="utf-8")
         else:
             conteudo_atual = caminho.read_text(encoding="utf-8")
-            conteudo_atual = self._adicionar_link_se_nao_existir(conteudo_atual, "### 📹 Mencionada nos Vídeos:", video_link)
+            conteudo_atual = self._adicionar_link_se_nao_existir(
+                conteudo_atual, "### 📹 Mencionada nos Vídeos:", video_link
+            )
             for obra in obras:
-                conteudo_atual = self._adicionar_link_se_nao_existir(conteudo_atual, "### 📚 Obras Relacionadas:", f"[[{limpar_nome_ficheiro(obra)}]]")
+                conteudo_atual = self._adicionar_link_se_nao_existir(
+                    conteudo_atual, "### 📚 Obras Relacionadas:", f"[[{limpar_nome_ficheiro(obra)}]]"
+                )
             caminho.write_text(conteudo_atual, encoding="utf-8")
 
     # ------------------------------------------------------------------
@@ -186,26 +267,28 @@ aliases: []
         artefactos_relacionados = artefactos_relacionados or []
 
         if not caminho.exists():
-            conteudo = f"""---
-tipo: organizacao
-tags:
-  - organizacao
-aliases: []
----
-# {nome}
-
-### 🧩 Artefactos:
-"""
+            art_yaml = _yaml_lista(
+                "artefactos",
+                [f"[[{limpar_nome_ficheiro(a)}]]" for a in artefactos_relacionados],
+            )
+            conteudo = (
+                "---\n"
+                "tipo: organizacao\n"
+                "tags:\n"
+                "  - organizacao\n"
+                "aliases: []\n"
+                f"{art_yaml}"
+                "---\n"
+                f"# {nome}\n\n"
+                "### 🧩 Artefactos:\n"
+            )
             if artefactos_relacionados:
                 for a in artefactos_relacionados:
                     conteudo += f"- [[{limpar_nome_ficheiro(a)}]]\n"
             else:
                 conteudo += "_Nenhum artefacto associado ainda._\n"
 
-            conteudo += f"""
-### 📹 Mencionada nos Vídeos:
-- {video_link}
-"""
+            conteudo += f"\n### 📹 Mencionada nos Vídeos:\n- {video_link}\n"
             caminho.write_text(conteudo, encoding="utf-8")
         else:
             conteudo_atual = caminho.read_text(encoding="utf-8")
@@ -229,34 +312,37 @@ aliases: []
 
         autores_links = [f"[[{limpar_nome_ficheiro(a)}]]" for a in obra.autores]
         autores_str = ", ".join(autores_links) if autores_links else "Não especificado"
+        tipo_lower = (obra.tipo or "livro").strip().lower()
 
         if not caminho.exists():
-            contexto_str = f"> {obra.contexto}\n\n" if obra.contexto else ""
-            conteudo = f"""---
-tipo: {obra.tipo.lower()}
-autores: {autores_links}
-tags:
-  - {obra.tipo.lower()}
----
-# {obra.titulo}
-
-**Tipo:** {obra.tipo}  
-**Autor(es):** {autores_str}
-
-{contexto_str}### 📹 Mencionado nos Vídeos:
-- {video_link}
-"""
+            contexto_str = f"{_sanitizar_blockquote(obra.contexto)}\n\n" if obra.contexto else ""
+            autores_yaml = _yaml_lista("autores", autores_links)
+            conteudo = (
+                "---\n"
+                f"tipo: {_escapar_yaml_str(tipo_lower)}\n"
+                f"{autores_yaml}"
+                "tags:\n"
+                f"  - {_escapar_yaml_str(tipo_lower)}\n"
+                "---\n"
+                f"# {obra.titulo}\n\n"
+                f"**Tipo:** {obra.tipo}  \n"
+                f"**Autor(es):** {autores_str}\n\n"
+                f"{contexto_str}"
+                "### 📹 Mencionado nos Vídeos:\n"
+                f"- {video_link}\n"
+            )
             caminho.write_text(conteudo, encoding="utf-8")
         else:
             conteudo_atual = caminho.read_text(encoding="utf-8")
-            conteudo_atual = self._adicionar_link_se_nao_existir(conteudo_atual, "### 📹 Mencionado nos Vídeos:", video_link)
+            conteudo_atual = self._adicionar_link_se_nao_existir(
+                conteudo_atual, "### 📹 Mencionado nos Vídeos:", video_link
+            )
             caminho.write_text(conteudo_atual, encoding="utf-8")
 
-        # Garante que cada autor tem a sua própria nota e está conectado à obra
         for autor in obra.autores:
             autor_pessoa = PessoaMencionada(
                 nome=autor,
-                papel_ou_bio=f"Autor(a) da obra [[{limpar_nome_ficheiro(obra.titulo)}]]."
+                papel_ou_bio=f"Autor(a) da obra [[{limpar_nome_ficheiro(obra.titulo)}]].",
             )
             self.salvar_ou_atualizar_pessoa(autor_pessoa, video_link, [obra.titulo])
 
@@ -270,20 +356,22 @@ tags:
         caminho = self.pasta_temas / nome_ficheiro
 
         if not caminho.exists():
-            conteudo = f"""---
-tipo: tema
-tags:
-  - tema
----
-# {tema}
-
-### 📹 Vídeos sobre este tema:
-- {video_link}
-"""
+            conteudo = (
+                "---\n"
+                "tipo: tema\n"
+                "tags:\n"
+                "  - tema\n"
+                "---\n"
+                f"# {tema}\n\n"
+                "### 📹 Vídeos sobre este tema:\n"
+                f"- {video_link}\n"
+            )
             caminho.write_text(conteudo, encoding="utf-8")
         else:
             conteudo_atual = caminho.read_text(encoding="utf-8")
-            conteudo_atual = self._adicionar_link_se_nao_existir(conteudo_atual, "### 📹 Vídeos sobre este tema:", video_link)
+            conteudo_atual = self._adicionar_link_se_nao_existir(
+                conteudo_atual, "### 📹 Vídeos sobre este tema:", video_link
+            )
             caminho.write_text(conteudo_atual, encoding="utf-8")
 
     # ------------------------------------------------------------------
@@ -297,28 +385,29 @@ tags:
 
         subtipo = (artefacto.subtipo or "modelo").strip().lower()
         if subtipo not in config.SUBTIPOS_ARTEFACTO:
-            subtipo = "modelo"  # fallback defensivo
+            subtipo = "modelo"
 
         fabricante = (artefacto.fabricante_ou_autor or "").strip() or None
-        fabricante_link = f"[[{limpar_nome_ficheiro(fabricante)}]]" if fabricante else "null"
+        fabricante_link = f"[[{limpar_nome_ficheiro(fabricante)}]]" if fabricante else ""
 
         if not caminho.exists():
-            descricao_str = f"> {artefacto.descricao}\n\n" if artefacto.descricao else ""
-            conteudo = f"""---
-tipo: artefacto
-subtipo: {subtipo}
-fabricante: {fabricante_link}
-tags:
-  - artefacto/{subtipo}
----
-# {artefacto.nome}
-
-**Subtipo:** {subtipo}  
-**Fabricante/Autor:** {fabricante_link if fabricante else "Desconhecido"}
-
-{descricao_str}### 📹 Mencionado nos Vídeos:
-- {video_link}
-"""
+            descricao_str = f"{_sanitizar_blockquote(artefacto.descricao)}\n\n" if artefacto.descricao else ""
+            fab_yaml = f'fabricante: "{_escapar_yaml_str(fabricante_link)}"\n' if fabricante else "fabricante:\n"
+            conteudo = (
+                "---\n"
+                "tipo: artefacto\n"
+                f"subtipo: {_escapar_yaml_str(subtipo)}\n"
+                f"{fab_yaml}"
+                "tags:\n"
+                f"  - artefacto/{_escapar_yaml_str(subtipo)}\n"
+                "---\n"
+                f"# {artefacto.nome}\n\n"
+                f"**Subtipo:** {subtipo}  \n"
+                f"**Fabricante/Autor:** {fabricante_link if fabricante else 'Desconhecido'}\n\n"
+                f"{descricao_str}"
+                "### 📹 Mencionado nos Vídeos:\n"
+                f"- {video_link}\n"
+            )
             caminho.write_text(conteudo, encoding="utf-8")
         else:
             conteudo_atual = caminho.read_text(encoding="utf-8")
@@ -327,7 +416,6 @@ tags:
             )
             caminho.write_text(conteudo_atual, encoding="utf-8")
 
-        # Ligar o fabricante (organização ou pessoa)
         if fabricante:
             self._ligar_fabricante(fabricante, artefacto.nome, video_link)
 
@@ -338,23 +426,29 @@ tags:
     def formatar_entrada_diario(self, dados_video: Dict[str, Any], video_wikilink: str, data_leitura: str) -> str:
         """Gera o bloco de entrada no diário exatamente no formato personalizado do utilizador."""
         canal_id = dados_video.get("canal_id")
-        canal_str = f"{dados_video.get('canal')} (ID: {canal_id})" if canal_id else dados_video.get('canal')
-        descricao = dados_video.get('descricao', '').strip()
+        canal_str = f"{dados_video.get('canal')} (ID: {canal_id})" if canal_id else dados_video.get("canal")
+        descricao = (dados_video.get("descricao") or "").strip()
 
-        return f"""===========================
-# {video_wikilink}
-=== METADADOS DO VÍDEO ===
-Título: {dados_video.get('titulo')}
-Canal: {canal_str}
-Data de Publicação: {dados_video.get('data')}
-Data de Leitura: {data_leitura}
-Link: {dados_video.get('url')}
+        return (
+            "===========================\n"
+            f"# {video_wikilink}\n"
+            "=== METADADOS DO VÍDEO ===\n"
+            f"Título: {dados_video.get('titulo')}\n"
+            f"Canal: {canal_str}\n"
+            f"Data de Publicação: {dados_video.get('data')}\n"
+            f"Data de Leitura: {data_leitura}\n"
+            f"Link: {dados_video.get('url')}\n\n"
+            "--- Descrição ---\n"
+            f"{descricao}\n"
+        )
 
---- Descrição ---
-{descricao}
-"""
-
-    def atualizar_nota_diaria(self, dados_video: Dict[str, Any], video_wikilink: str, analise: AnaliseVideo, data_leitura: str = None):
+    def atualizar_nota_diaria(
+        self,
+        dados_video: Dict[str, Any],
+        video_wikilink: str,
+        analise: AnaliseVideo,
+        data_leitura: str = None,
+    ):
         """Regista o bloco do vídeo no diário (YYYY-MM-DD.md) usando a data de leitura."""
         if not data_leitura:
             data_leitura = datetime.date.today().isoformat()
@@ -365,20 +459,16 @@ Link: {dados_video.get('url')}
         if caminho_diario.exists():
             conteudo = caminho_diario.read_text(encoding="utf-8")
             if video_wikilink in conteudo:
-                # Já está registado no diário
                 return
 
-            # Se houver secção # Resenha do dia, insere imediatamente antes
-            if "# Resenha do dia" in conteudo or "# Resenha do Dia" in conteudo:
-                padrao = r"(#\s+Resenha do [Dd]ia)"
-                substituicao = f"{bloco_novo}\n\\1"
-                novo_conteudo = self._inserir_antes_resenha(conteudo, bloco_novo)
-                if novo_conteudo is not None:
-                    caminho_diario.write_text(novo_conteudo, encoding="utf-8")
-                    logger.info(f"    ✓ Diário {data_leitura}.md atualizado com o bloco de metadados antes da resenha.\n")
-                    return
+            novo_conteudo = self._inserir_antes_resenha(conteudo, bloco_novo)
+            if novo_conteudo is not None:
+                caminho_diario.write_text(novo_conteudo, encoding="utf-8")
+                logger.info(
+                    f"    ✓ Diário {data_leitura}.md atualizado com o bloco de metadados antes da resenha.\n"
+                )
+                return
 
-            # Caso contrário, acrescenta no fim do diário
             novo_conteudo = conteudo.rstrip() + f"\n\n{bloco_novo}\n"
             caminho_diario.write_text(novo_conteudo, encoding="utf-8")
             logger.info(f"    ✓ Diário {data_leitura}.md atualizado com o novo bloco de metadados.\n")
@@ -395,26 +485,21 @@ Link: {dados_video.get('url')}
         if not data_leitura:
             data_leitura = datetime.date.today().isoformat()
 
-        # Usa o título original limpo diretamente para o nome da nota (sem prefixar a data)
         nome_base = limpar_nome_ficheiro(analise.titulo_sugerido or dados_video.get("titulo", "Video"))
         nome_ficheiro = f"{nome_base}.md"
         caminho_video = self.pasta_videos / nome_ficheiro
-
         video_wikilink = f"[[{caminho_video.stem}]]"
 
-        # Separa pessoas válidas de organizações que o Gemini possa ter metido no campo errado
         pessoas_validas = [p for p in analise.pessoas if eh_nome_valido_pessoa(p.nome)]
         organizacoes_extra = {p.nome.strip() for p in analise.pessoas if eh_organizacao(p.nome)}
         organizacoes_todas = list({*[o.strip() for o in analise.organizacoes if o and o.strip()], *organizacoes_extra})
 
-        # Constrói listas de links para o frontmatter
         pessoas_links = [f"[[{limpar_nome_ficheiro(p.nome)}]]" for p in pessoas_validas]
         obras_links = [f"[[{limpar_nome_ficheiro(o.titulo)}]]" for o in analise.obras]
         temas_links = [f"[[{limpar_nome_ficheiro(t)}]]" for t in analise.temas]
         artefactos_links = [f"[[{limpar_nome_ficheiro(a.nome)}]]" for a in analise.artefactos]
         organizacoes_links = [f"[[{limpar_nome_ficheiro(o)}]]" for o in organizacoes_todas]
 
-        # Preserva o data_leitura original se a nota já existir
         data_leitura_final = data_leitura
         if caminho_video.exists():
             conteudo_existente = caminho_video.read_text(encoding="utf-8")
@@ -422,36 +507,35 @@ Link: {dados_video.get('url')}
             if match:
                 data_leitura_final = match.group(1)
 
-        nota = f"""---
-tipo: video
-titulo: "{dados_video.get('titulo')}"
-canal: "{dados_video.get('canal')}"
-data_publicacao: "{dados_video.get('data')}"
-data_leitura: "{data_leitura_final}"
-url: "{dados_video.get('url')}"
-tags:
-  - video/youtube
-temas: {temas_links}
-pessoas: {pessoas_links}
-obras: {obras_links}
-artefactos: {artefactos_links}
-organizacoes: {organizacoes_links}
----
-# {analise.titulo_sugerido}
+        frontmatter = (
+            "---\n"
+            "tipo: video\n"
+            f'titulo: "{_escapar_yaml_str(dados_video.get("titulo"))}"\n'
+            f'canal: "{_escapar_yaml_str(dados_video.get("canal"))}"\n'
+            f'data_publicacao: "{_escapar_yaml_str(dados_video.get("data"))}"\n'
+            f'data_leitura: "{_escapar_yaml_str(data_leitura_final)}"\n'
+            f'url: "{_escapar_yaml_str(dados_video.get("url"))}"\n'
+            "tags:\n"
+            "  - video/youtube\n"
+            + _yaml_lista("temas", temas_links)
+            + _yaml_lista("pessoas", pessoas_links)
+            + _yaml_lista("obras", obras_links)
+            + _yaml_lista("artefactos", artefactos_links)
+            + _yaml_lista("organizacoes", organizacoes_links)
+            + "---\n"
+        )
 
-> 📺 **Canal:** [{dados_video.get('canal')}]({dados_video.get('canal_url', '')})  
-> 📅 **Data:** {dados_video.get('data')}  
-> 🔗 **Ver no YouTube:** [{dados_video.get('url')}]({dados_video.get('url')})
-
----
-
-## 📝 Resumo Executivo
-{analise.resumo_executivo}
-
----
-
-## 💡 Principais Takeaways
-"""
+        nota = frontmatter + (
+            f"# {analise.titulo_sugerido}\n\n"
+            f"> 📺 **Canal:** [{dados_video.get('canal')}]({dados_video.get('canal_url', '')})  \n"
+            f"> 📅 **Data:** {dados_video.get('data')}  \n"
+            f"> 🔗 **Ver no YouTube:** [{dados_video.get('url')}]({dados_video.get('url')})\n\n"
+            "---\n\n"
+            "## 📝 Resumo Executivo\n"
+            f"{analise.resumo_executivo}\n\n"
+            "---\n\n"
+            "## 💡 Principais Takeaways\n"
+        )
         for takeaway in analise.takeaways_principais:
             nota += f"- {takeaway}\n"
 
@@ -480,7 +564,11 @@ organizacoes: {organizacoes_links}
         nota += "\n---\n\n## 📚 Livros, Artigos & Papers Citados\n"
         if analise.obras:
             for o in analise.obras:
-                autores_fmt = ", ".join(f"[[{limpar_nome_ficheiro(a)}]]" for a in o.autores) if o.autores else "Autor desconhecido"
+                autores_fmt = (
+                    ", ".join(f"[[{limpar_nome_ficheiro(a)}]]" for a in o.autores)
+                    if o.autores
+                    else "Autor desconhecido"
+                )
                 contexto_fmt = f" — _{o.contexto}_" if o.contexto else ""
                 nota += f"- **[[{limpar_nome_ficheiro(o.titulo)}]]** ({o.tipo}) por {autores_fmt}{contexto_fmt}\n"
         else:
@@ -515,38 +603,27 @@ organizacoes: {organizacoes_links}
         for t in analise.temas:
             nota += f"- [[{limpar_nome_ficheiro(t)}]]\n"
 
-        # Grava a nota do vídeo
         caminho_video.write_text(nota, encoding="utf-8")
-
-        # Regista automaticamente a chamada deste vídeo na Nota Diária (YYYY-MM-DD.md)
         self.atualizar_nota_diaria(dados_video, video_wikilink, analise, data_leitura_final)
 
-        # ------------------------------------------------------------------
-        # Propagação para entidades relacionadas
-        # ------------------------------------------------------------------
-
-        # Pessoas (filtra as que na verdade são organizações)
         for p in pessoas_validas:
             obras_desta_pessoa = [o.titulo for o in analise.obras if p.nome in o.autores]
             self.salvar_ou_atualizar_pessoa(p, video_wikilink, obras_desta_pessoa)
 
-        # Obras
         for o in analise.obras:
             self.salvar_ou_atualizar_obra(o, video_wikilink)
 
-        # Temas
         for t in analise.temas:
             self.salvar_ou_atualizar_tema(t, video_wikilink)
 
-        # Organizações (inclui as que foram resgatadas do campo pessoas)
         for org in organizacoes_todas:
             artefactos_da_org = [
-                a.nome for a in analise.artefactos
+                a.nome
+                for a in analise.artefactos
                 if a.fabricante_ou_autor and a.fabricante_ou_autor.strip().lower() == org.lower()
             ]
             self.salvar_ou_atualizar_organizacao(org, video_wikilink, artefactos_da_org)
 
-        # Artefactos (e ligação ao fabricante)
         for a in analise.artefactos:
             self.salvar_ou_atualizar_artefacto(a, video_wikilink)
 
@@ -568,7 +645,7 @@ organizacoes: {organizacoes_links}
         agenda: AgendaScout,
         sessao: SessaoScout,
         analise: PalestraAnalise,
-        data_leitura: str = None
+        data_leitura: str = None,
     ) -> Path:
         """Cria uma nota atómica dedicada a uma palestra individual dentro da subpasta da conferência."""
         if not data_leitura:
@@ -581,7 +658,6 @@ organizacoes: {organizacoes_links}
         orador_limpo = f" - {limpar_nome_ficheiro(sessao.orador_principal)}" if sessao.orador_principal else ""
         titulo_limpo = limpar_nome_ficheiro(analise.titulo_palestra or sessao.titulo_palestra)
         nome_ficheiro = f"{dia_prefixo} - {sessao.ordem:02d}{orador_limpo} - {titulo_limpo}.md"
-        # Limita tamanho se for muito longo
         if len(nome_ficheiro) > 130:
             nome_ficheiro = f"{dia_prefixo} - {sessao.ordem:02d}{orador_limpo} - {titulo_limpo[:80]}.md"
 
@@ -589,11 +665,9 @@ organizacoes: {organizacoes_links}
         palestra_wikilink = f"[[{caminho_palestra.stem}]]"
         moc_conferencia_wikilink = f"[[{limpar_nome_ficheiro(agenda.nome_conferencia)}]]"
 
-        # Deep link para o segundo exato
         video_id = dados_video.get("id")
         deep_link = f"https://youtu.be/{video_id}?t={sessao.segundos_inicio}" if video_id else dados_video.get("url")
 
-        # Pessoas e organizações
         pessoas_validas = [p for p in analise.pessoas if eh_nome_valido_pessoa(p.nome)]
         organizacoes_extra = {p.nome.strip() for p in analise.pessoas if eh_organizacao(p.nome)}
         organizacoes_todas = list({*[o.strip() for o in analise.organizacoes if o and o.strip()], *organizacoes_extra})
@@ -604,47 +678,50 @@ organizacoes: {organizacoes_links}
         artefactos_links = [f"[[{limpar_nome_ficheiro(a.nome)}]]" for a in analise.artefactos]
         organizacoes_links = [f"[[{limpar_nome_ficheiro(o)}]]" for o in organizacoes_todas]
 
-        orador_fmt = f"[[{limpar_nome_ficheiro(sessao.orador_principal)}]]" if sessao.orador_principal else "Vários / Painel"
+        orador_fmt = (
+            f"[[{limpar_nome_ficheiro(sessao.orador_principal)}]]"
+            if sessao.orador_principal
+            else "Vários / Painel"
+        )
         org_fmt = f"([[{limpar_nome_ficheiro(sessao.organizacao)}]])" if sessao.organizacao else ""
         tag_conf = limpar_nome_ficheiro(agenda.nome_conferencia).lower().replace(" ", "-")
 
-        nota = f"""---
-tipo: video_palestra
-conferencia: "{moc_conferencia_wikilink}"
-dia: {dia_num}
-ordem: {sessao.ordem}
-orador: "{sessao.orador_principal or 'Vários'}"
-organizacao: "{sessao.organizacao or ''}"
-timestamp_inicio: "{sessao.timestamp_inicio}"
-timestamp_fim: "{sessao.timestamp_fim}"
-url_palestra: "{deep_link}"
-data_publicacao: "{dados_video.get('data')}"
-data_leitura: "{data_leitura}"
-tags:
-  - video/palestra
-  - conferencia/{tag_conf}
-temas: {temas_links}
-pessoas: {pessoas_links}
-obras: {obras_links}
-artefactos: {artefactos_links}
-organizacoes: {organizacoes_links}
----
-# {analise.titulo_palestra or sessao.titulo_palestra}
+        frontmatter = (
+            "---\n"
+            "tipo: video_palestra\n"
+            f'conferencia: "{_escapar_yaml_str(moc_conferencia_wikilink)}"\n'
+            f"dia: {dia_num}\n"
+            f"ordem: {sessao.ordem}\n"
+            f'orador: "{_escapar_yaml_str(sessao.orador_principal or "Vários")}"\n'
+            f'organizacao: "{_escapar_yaml_str(sessao.organizacao or "")}"\n'
+            f'timestamp_inicio: "{_escapar_yaml_str(sessao.timestamp_inicio)}"\n'
+            f'timestamp_fim: "{_escapar_yaml_str(sessao.timestamp_fim)}"\n'
+            f'url_palestra: "{_escapar_yaml_str(deep_link)}"\n'
+            f'data_publicacao: "{_escapar_yaml_str(dados_video.get("data"))}"\n'
+            f'data_leitura: "{_escapar_yaml_str(data_leitura)}"\n'
+            "tags:\n"
+            "  - video/palestra\n"
+            f"  - conferencia/{_escapar_yaml_str(tag_conf)}\n"
+            + _yaml_lista("temas", temas_links)
+            + _yaml_lista("pessoas", pessoas_links)
+            + _yaml_lista("obras", obras_links)
+            + _yaml_lista("artefactos", artefactos_links)
+            + _yaml_lista("organizacoes", organizacoes_links)
+            + "---\n"
+        )
 
-> 🏛️ **Conferência:** {moc_conferencia_wikilink} (Dia {dia_num})  
-> 👤 **Orador:** {orador_fmt} {org_fmt}  
-> ⏱️ **Momento:** `{sessao.timestamp_inicio} -> {sessao.timestamp_fim}`  
-> 🔗 **Ver Palestra no YouTube:** [{deep_link}]({deep_link})
-
----
-
-## 📝 Resumo da Palestra
-{analise.resumo_executivo}
-
----
-
-## 💡 Principais Takeaways
-"""
+        nota = frontmatter + (
+            f"# {analise.titulo_palestra or sessao.titulo_palestra}\n\n"
+            f"> 🏛️ **Conferência:** {moc_conferencia_wikilink} (Dia {dia_num})  \n"
+            f"> 👤 **Orador:** {orador_fmt} {org_fmt}  \n"
+            f"> ⏱️ **Momento:** `{sessao.timestamp_inicio} -> {sessao.timestamp_fim}`  \n"
+            f"> 🔗 **Ver Palestra no YouTube:** [{deep_link}]({deep_link})\n\n"
+            "---\n\n"
+            "## 📝 Resumo da Palestra\n"
+            f"{analise.resumo_executivo}\n\n"
+            "---\n\n"
+            "## 💡 Principais Takeaways\n"
+        )
         for tk in analise.takeaways_principais:
             nota += f"- {tk}\n"
 
@@ -691,10 +768,8 @@ organizacoes: {organizacoes_links}
             for tm in analise.temas:
                 nota += f"- [[{limpar_nome_ficheiro(tm)}]]\n"
 
-        # Grava a nota atómica da palestra
         caminho_palestra.write_text(nota, encoding="utf-8")
 
-        # Propaga entidades para as notas dedicadas (Pessoas, Artefactos, etc.)
         for p in pessoas_validas:
             obras_p = [o.titulo for o in analise.obras if p.nome in o.autores]
             self.salvar_ou_atualizar_pessoa(p, palestra_wikilink, obras_p)
@@ -707,7 +782,8 @@ organizacoes: {organizacoes_links}
 
         for org in organizacoes_todas:
             artefactos_org = [
-                a.nome for a in analise.artefactos
+                a.nome
+                for a in analise.artefactos
                 if a.fabricante_ou_autor and a.fabricante_ou_autor.strip().lower() == org.lower()
             ]
             self.salvar_ou_atualizar_organizacao(org, palestra_wikilink, artefactos_org)
@@ -722,7 +798,7 @@ organizacoes: {organizacoes_links}
         dados_video: Dict[str, Any],
         agenda: AgendaScout,
         palestras_processadas: List[Dict[str, Any]],
-        data_leitura: str = None
+        data_leitura: str = None,
     ) -> Path:
         """Cria ou atualiza a Nota-Mãe MOC da conferência, acumulando os dias sem apagar dias anteriores."""
         if not data_leitura:
@@ -737,15 +813,19 @@ organizacoes: {organizacoes_links}
         data_sessao = agenda.data_sessao or dados_video.get("data", "")
         seccao_cabecalho_dia = f"## 📅 {dia_rotulo} ({data_sessao})"
 
-        # Constrói tabela markdown das palestras deste dia
-        tabela_dia = f"""{seccao_cabecalho_dia}
+        duracao_raw = dados_video.get("duracao_segundos")
+        try:
+            duracao_min = int(float(duracao_raw) // 60) if duracao_raw is not None else 0
+        except (TypeError, ValueError):
+            duracao_min = 0
 
-> 🔗 **Transmissão Completa deste Dia:** [{dados_video.get('titulo')}]({dados_video.get('url')})  
-> ⏱️ **Duração Total:** {int(dados_video.get('duracao_segundos', 0) // 60)} min | **Total de Palestras:** {len(palestras_processadas)}
-
-| # | Início | Orador | Empresa | Palestra |
-|---|---|---|---|---|
-"""
+        tabela_dia = (
+            f"{seccao_cabecalho_dia}\n\n"
+            f"> 🔗 **Transmissão Completa deste Dia:** [{dados_video.get('titulo')}]({dados_video.get('url')})  \n"
+            f"> ⏱️ **Duração Total:** {duracao_min} min | **Total de Palestras:** {len(palestras_processadas)}\n\n"
+            "| # | Início | Orador | Empresa | Palestra |\n"
+            "|---|---|---|---|---|\n"
+        )
         for p in palestras_processadas:
             s: SessaoScout = p["sessao"]
             link_palestra = f"[[{p['caminho'].stem}]]"
@@ -755,39 +835,41 @@ organizacoes: {organizacoes_links}
 
         if not caminho_moc.exists():
             tag_conf = limpar_nome_ficheiro(agenda.nome_conferencia).lower().replace(" ", "-")
-            conteudo_moc = f"""---
-tipo: conferencia_moc
-conferencia: "{agenda.nome_conferencia}"
-canal: "{dados_video.get('canal')}"
-data_primeira_leitura: "{data_leitura}"
-tags:
-  - conferencia/moc
-  - conferencia/{tag_conf}
----
-# 🏛️ {agenda.nome_conferencia}
-
-> 📺 **Canal Organizador:** [{dados_video.get('canal')}]({dados_video.get('canal_url', '')})  
-> 📂 **Pasta de Palestras:** `{pasta_conf.name}/`
-
-Este ficheiro é o **Mapa de Conteúdo (MOC)** que centraliza todos os dias e palestras da conferência.
-
----
-
-{tabela_dia}
-"""
+            conteudo_moc = (
+                "---\n"
+                "tipo: conferencia_moc\n"
+                f'conferencia: "{_escapar_yaml_str(agenda.nome_conferencia)}"\n'
+                f'canal: "{_escapar_yaml_str(dados_video.get("canal"))}"\n'
+                f'data_primeira_leitura: "{_escapar_yaml_str(data_leitura)}"\n'
+                "tags:\n"
+                "  - conferencia/moc\n"
+                f"  - conferencia/{_escapar_yaml_str(tag_conf)}\n"
+                "---\n"
+                f"# 🏛️ {agenda.nome_conferencia}\n\n"
+                f"> 📺 **Canal Organizador:** [{dados_video.get('canal')}]({dados_video.get('canal_url', '')})  \n"
+                f"> 📂 **Pasta de Palestras:** `{pasta_conf.name}/`\n\n"
+                "Este ficheiro é o **Mapa de Conteúdo (MOC)** que centraliza todos os dias e palestras da conferência.\n\n"
+                "---\n\n"
+                f"{tabela_dia}\n"
+            )
             caminho_moc.write_text(conteudo_moc, encoding="utf-8")
         else:
             conteudo_existente = caminho_moc.read_text(encoding="utf-8")
-            # Se a secção deste dia já existia, substitui-a; caso contrário, acrescenta no fim
             padrao_dia = re.compile(rf"{re.escape(seccao_cabecalho_dia)}[\s\S]*?(?=\n## 📅|\Z)")
             if padrao_dia.search(conteudo_existente):
-                novo_conteudo = padrao_dia.sub(tabela_dia.strip(), conteudo_existente)
+                novo_conteudo = padrao_dia.sub(lambda _m: tabela_dia.strip(), conteudo_existente, count=1)
             else:
                 novo_conteudo = conteudo_existente.rstrip() + f"\n\n---\n\n{tabela_dia}\n"
             caminho_moc.write_text(novo_conteudo, encoding="utf-8")
 
-        # Atualiza o Diário com o registo da conferência
-        self.atualizar_diario_conferencia(dados_video, agenda, f"[[{caminho_moc.stem}]]", len(palestras_processadas), data_leitura)
+        self.atualizar_diario_conferencia(
+            dados_video,
+            agenda,
+            f"[[{caminho_moc.stem}]]",
+            len(palestras_processadas),
+            data_leitura,
+            pasta_conf_nome=pasta_conf.name,
+        )
 
         return caminho_moc
 
@@ -797,7 +879,8 @@ Este ficheiro é o **Mapa de Conteúdo (MOC)** que centraliza todos os dias e pa
         agenda: AgendaScout,
         moc_wikilink: str,
         total_palestras: int,
-        data_leitura: str = None
+        data_leitura: str = None,
+        pasta_conf_nome: Optional[str] = None,
     ):
         """Regista a conferência no Diário (YYYY-MM-DD.md) com link para o MOC e lista das palestras do dia."""
         if not data_leitura:
@@ -805,39 +888,45 @@ Este ficheiro é o **Mapa de Conteúdo (MOC)** que centraliza todos os dias e pa
 
         caminho_diario = self.vault_path / f"{data_leitura}.md"
         canal_id = dados_video.get("canal_id")
-        canal_str = f"{dados_video.get('canal')} (ID: {canal_id})" if canal_id else dados_video.get('canal')
+        canal_str = f"{dados_video.get('canal')} (ID: {canal_id})" if canal_id else dados_video.get("canal")
         dia_rotulo = agenda.dia_rotulo or f"Dia {agenda.dia or 1}"
+        pasta_ref = pasta_conf_nome or limpar_nome_ficheiro(agenda.nome_conferencia)
+        descricao_curta = (dados_video.get("descricao") or "").strip()[:800]
 
-        bloco_novo = f"""===========================
-# {moc_wikilink} — {dia_rotulo}
-=== METADADOS DA CONFERÊNCIA ===
-Conferência: {moc_wikilink} ({dia_rotulo})
-Canal: {canal_str}
-Data da Sessão: {agenda.data_sessao or dados_video.get('data')}
-Data de Leitura: {data_leitura}
-Palestras Integradas: {total_palestras} notas atómicas na subpasta [[{moc_wikilink}]]
-Link da Transmissão: {dados_video.get('url')}
+        bloco_novo = (
+            "===========================\n"
+            f"# {moc_wikilink} — {dia_rotulo}\n"
+            "=== METADADOS DA CONFERÊNCIA ===\n"
+            f"Conferência: {moc_wikilink} ({dia_rotulo})\n"
+            f"Canal: {canal_str}\n"
+            f"Data da Sessão: {agenda.data_sessao or dados_video.get('data')}\n"
+            f"Data de Leitura: {data_leitura}\n"
+            f"Palestras Integradas: {total_palestras} notas atómicas na subpasta `{pasta_ref}/`\n"
+            f"Link da Transmissão: {dados_video.get('url')}\n\n"
+            "--- Descrição ---\n"
+            f"{descricao_curta}...\n"
+        )
 
---- Descrição ---
-{dados_video.get('descricao', '').strip()[:800]}...
-"""
         if caminho_diario.exists():
             conteudo = caminho_diario.read_text(encoding="utf-8")
             if f"# {moc_wikilink} — {dia_rotulo}" in conteudo:
                 return
 
-            if "# Resenha do dia" in conteudo or "# Resenha do Dia" in conteudo:
-                padrao = r"(#\s+Resenha do [Dd]ia)"
-                substituicao = f"{bloco_novo}\n\\1"
-                novo_conteudo = self._inserir_antes_resenha(conteudo, bloco_novo)
-                if novo_conteudo is not None:
-                    caminho_diario.write_text(novo_conteudo, encoding="utf-8")
-                    logger.info(f"    ✓ {moc_wikilink} ({dia_rotulo}).md atualizado com o bloco de metadados antes da resenha.\n")
-                    return
+            novo_conteudo = self._inserir_antes_resenha(conteudo, bloco_novo)
+            if novo_conteudo is not None:
+                caminho_diario.write_text(novo_conteudo, encoding="utf-8")
+                logger.info(
+                    f"    ✓ Diário {data_leitura}.md atualizado com a conferência {moc_wikilink} ({dia_rotulo}) antes da resenha.\n"
+                )
+                return
 
             novo_conteudo = conteudo.rstrip() + f"\n\n{bloco_novo}\n"
             caminho_diario.write_text(novo_conteudo, encoding="utf-8")
-            logger.info(f"    ✓ Diário {data_leitura}.md atualizado com a conferência {moc_wikilink} ({dia_rotulo}).\n")
+            logger.info(
+                f"    ✓ Diário {data_leitura}.md atualizado com a conferência {moc_wikilink} ({dia_rotulo}).\n"
+            )
         else:
             caminho_diario.write_text(bloco_novo + "\n", encoding="utf-8")
-            logger.info(f"    ✓ Diário {data_leitura}.md criado com a conferência {moc_wikilink} ({dia_rotulo}).\n")
+            logger.info(
+                f"    ✓ Diário {data_leitura}.md criado com a conferência {moc_wikilink} ({dia_rotulo}).\n"
+            )
