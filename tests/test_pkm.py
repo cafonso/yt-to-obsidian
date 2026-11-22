@@ -6,6 +6,9 @@ from extrator import extrair_id_youtube, formatar_tempo
 from canonicalizer import norm, chave_bloqueio, Canonicalizer
 
 
+from models import ArtefactoIA, ObraCitada, PessoaMencionada
+import yaml
+
 # ==========================================
 # TESTES DE UTILS (Validação de Entidades)
 # ==========================================
@@ -23,7 +26,14 @@ def test_eh_nome_valido_pessoa():
     assert eh_nome_valido_pessoa("Satya Nadella") is True
     assert eh_nome_valido_pessoa("Sarah") is False  # Falha por ter apenas um token
     assert eh_nome_valido_pessoa("OpenAI") is False  # É organização, logo nome de pessoa inválido
+    
 
+def test_validacao_pessoa_e_organizacao_casos_limite() -> None:
+    assert eh_nome_valido_pessoa("Jordan Ellenberg") is True
+    assert eh_nome_valido_pessoa("jordan ellenberg") is True
+    assert eh_nome_valido_pessoa("Monónimo") is False
+    assert eh_nome_valido_pessoa("   ") is False
+    assert isinstance(eh_organizacao("Ruby Central"), bool)
 
 # ==========================================
 # TESTES DO EXTRACTOR (YouTube & Tempos)
@@ -86,3 +96,56 @@ def test_canonicalizer_fluxo_isolado(tmp_path: Path):
 
     assert aliases_f.exists()
     assert decisoes_f.exists()
+    
+def test_canonicalizer_carrega_aliases_de_yaml_existente(tmp_path) -> None:
+    aliases_file = tmp_path / "aliases.yaml"
+    decisoes_file = tmp_path / "decisoes.jsonl"
+    revisao_file = tmp_path / "revisao.md"
+
+    aliases_file.write_text(
+        yaml.safe_dump(
+            {
+                "tema": {
+                    "Fine-Tuning": ["Fine Tuning", "fine tuning"],
+                }
+            },
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    c = Canonicalizer(
+        aliases_path=aliases_file,
+        decisoes_path=decisoes_file,
+        revisao_path=revisao_file,
+    )
+    assert c.canonicalizar_strings("tema", ["Fine Tuning", "fine tuning"]) == ["Fine-Tuning"]
+    
+def test_canonicalizar_strings_tipo_invalido_levanta_value_error(tmp_path) -> None:
+    c = Canonicalizer(
+        aliases_path=tmp_path / "aliases.yaml",
+        decisoes_path=tmp_path / "decisoes.jsonl",
+        revisao_path=tmp_path / "revisao.md",
+    )
+    with pytest.raises(ValueError):
+        c.canonicalizar_strings("temas", ["LLM"])
+        
+def test_canonicalizer_persiste_aliases_e_recarrega(tmp_path) -> None:
+    aliases_file = tmp_path / "aliases.yaml"
+    decisoes_file = tmp_path / "decisoes.jsonl"
+    revisao_file = tmp_path / "revisao.md"
+
+    c1 = Canonicalizer(aliases_path=aliases_file, decisoes_path=decisoes_file, revisao_path=revisao_file)
+    resultado = c1.canonicalizar_strings("tema", ["Fine-Tuning", "Fine Tuning", "LLM"])
+    assert resultado == ["Fine-Tuning", "LLM"]   # explícito em vez de len == 2
+    c1.gravar()
+
+    # Verifica o conteúdo do aliases.yaml antes de recarregar
+    import yaml
+    aliases = yaml.safe_load(aliases_file.read_text(encoding="utf-8"))
+    assert "Fine-Tuning" in aliases["tema"]
+    assert "Fine Tuning" not in aliases["tema"]   # "Fine Tuning" é alias, não canónico
+
+    c2 = Canonicalizer(aliases_path=aliases_file, decisoes_path=decisoes_file, revisao_path=revisao_file)
+    assert c2.canonicalizar_strings("tema", ["Fine Tuning"]) == ["Fine-Tuning"]

@@ -240,6 +240,13 @@ class Canonicalizer:
             metodo = "exato" if norm(canonical) == n else "alias"
             return canonical, Decisao(tipo, nome, canonical, metodo)
 
+        # Via 1.5 (NOVA): match por normalização contra os canónicos existentes.
+        # Apanha variantes de pontuação/caixa/acentos que o `norm()` colapsa
+        # (ex.: "Fine-Tuning" vs "Fine Tuning", "GPT-4o" vs "GPT 4o").
+        for canon_existente in self._dict.get(tipo, {}):
+            if norm(canon_existente) == n:
+                return canon_existente, Decisao(tipo, nome, canon_existente, "exato")
+
         # Via 2: fuzzy contra os canónicos conhecidos, com blocking opcional
         candidatos = list(self._dict.get(tipo, {}).keys())
         if candidatos:
@@ -266,13 +273,25 @@ class Canonicalizer:
 
 
     def _registar_fusao(self, tipo: str, canonical: str, raw: str, decisao: Decisao):
+        """
+        Regista a fusão no dicionário em memória e no lookup.
+        Garante que o canónico entra sempre no `_dict` e no `_lookup`,
+        mesmo quando `raw == canonical` (caso contrário, a próxima execução
+        não o encontraria por normalização).
+        """
+        # Garante que o canónico existe no dicionário (mesmo com lista de aliases vazia)
+        entry = self._dict.setdefault(tipo, {}).setdefault(canonical, [])
+
+        # Lookup do próprio canónico — sempre atualizado
+        self._lookup.setdefault(tipo, {})[norm(canonical)] = canonical
+
+        # Alias explícito — só se for diferente após normalização
         if self.aprender_aliases and norm(raw) != norm(canonical):
-           entry = self._dict.setdefault(tipo, {}).setdefault(canonical, [])
-           # Só grava se não houver já um alias equivalente após normalização
-           existentes_norm = {norm(a) for a in entry} | {norm(canonical)}
-           if norm(raw) not in existentes_norm:
-              entry.append(raw)
-           self._lookup.setdefault(tipo, {})[norm(raw)] = canonical
+            existentes_norm = {norm(a) for a in entry} | {norm(canonical)}
+            if norm(raw) not in existentes_norm:
+                entry.append(raw)
+            self._lookup[tipo][norm(raw)] = canonical
+
         self._decisoes.append(decisao)
         
     # ------------------------------------------------------------------
