@@ -9,9 +9,9 @@ def main() -> None:
     raiz_projeto = Path(__file__).resolve().parent.parent
     load_dotenv(raiz_projeto / ".env")
 
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        raise RuntimeError("GEMINI_API_KEY não definida no ambiente nem no .env da raiz.")
+       raise RuntimeError("GOOGLE_API_KEY (ou GEMINI_API_KEY) não definida no ambiente nem no .env da raiz.")
 
     client = genai.Client(api_key=api_key)
 

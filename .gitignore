@@ -56,3 +56,6 @@ lista_videos.txt
 # outros agents
 .claude/
 
+# skills externas (geridas por skills-lock.json)
+skills/
+.claude/skills

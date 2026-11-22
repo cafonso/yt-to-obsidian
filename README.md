@@ -96,7 +96,7 @@ uv run pytest
 ├── analyzer.py          # Comunicação com Gemini, retries/backoff, Map-Reduce e Scout
 ├── canonicalizer.py     # Resolução determinística e fuzzy match de entidades
 ├── config.py            # Configurações centralizadas e thresholds
-├── extrator.py         # Extração de metadados, legendas e fatiamento via yt-dlp/ffmpeg
+├── extrator.py          # Extração de metadados, legendas e fatiamento via yt-dlp/ffmpeg
 ├── main.py              # CLI, menu interativo e orquestração do pipeline
 ├── models.py            # Esquemas Pydantic para Structured Outputs
 ├── README.md            # Documentação do projeto
