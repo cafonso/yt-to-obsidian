@@ -4,23 +4,6 @@ import logging
 import config
 from utils import configurar_logging, validar_cofre
 
-
-def test_validar_cofre_existente(tmp_path: Path) -> None:
-    cofre_valido = tmp_path / "CofreTeste"
-    cofre_valido.mkdir()
-
-    assert validar_cofre(cofre_valido) == cofre_valido
-
-
-def test_validar_cofre_inexistente_lanca_erro(tmp_path: Path) -> None:
-    cofre_inexistente = tmp_path / "CofreQueNaoExiste"
-
-    with pytest.raises(FileNotFoundError):
-        validar_cofre(cofre_inexistente)
-        
-
-
-
 def test_validar_cofre_existente(tmp_path: Path) -> None:
     cofre_valido = tmp_path / "CofreTeste"
     cofre_valido.mkdir()
