@@ -586,7 +586,7 @@ class ObsidianVaultWriter:
 
         if analise.recursos_e_links:
             if self.validar_links:
-                print("    🌐 A verificar disponibilidade dos links externos...")
+                logger.info("    🌐 A verificar disponibilidade dos links externos...")
             recursos_verificados = validar_recursos_externos(analise.recursos_e_links, ativar=self.validar_links)
             nota += "\n---\n\n## 🔗 Links & Recursos Mencionados\n"
             for recurso in recursos_verificados:
