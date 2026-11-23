@@ -203,11 +203,10 @@ class YouTubeExtractor:
         return caminho_audio
 
     def extrair_tudo(self, url: str) -> Dict[str, Any]:
-        
+        """Combina metadados e transcrição ou ativa o áudio fallback em caso de bloqueio."""        
         if not self.validar_url_youtube(url):
             raise ValueError(f"URL do YouTube inválido ou malformado: '{url}'")
-            
-        """Combina metadados e transcrição ou ativa o áudio fallback em caso de bloqueio."""
+ 
         video_id = extrair_id_youtube(url)
         if not video_id:
             raise ValueError(f"URL inválido do YouTube: {url}")
