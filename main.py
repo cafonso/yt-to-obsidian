@@ -17,6 +17,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 import config
 from utils import configurar_logging
+from regras import deve_saltar
 from extrator import YouTubeExtractor, extrair_id_youtube
 from analyzer import VideoAnalyzer
 from vault_writer import ObsidianVaultWriter
@@ -83,9 +84,7 @@ def processar_um_video(
     video_id = extrair_id_youtube(url)
     historico = carregar_historico(caminho_historico)
 
-    if video_id and not forcar and video_id in historico:
-        titulo_antigo = historico[video_id].get("titulo", "Vídeo")
-        print(f"⏭️ [Saltar] '{titulo_antigo}' já foi integrado no Obsidian. (Usa --forcar para reanalisar)")
+    if deve_saltar(video_id, historico, forcar):
         return False
 
     print("\n=======================================================")
