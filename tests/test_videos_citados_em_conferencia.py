@@ -1,16 +1,16 @@
- from pathlib import Path
+from pathlib import Path
 from types import SimpleNamespace
 import pytest
 
 from models import PalestraAnalise, VideoCitado
-from vault_writer import VaultWriter
+from vault_writer import ObsidianVaultWriter
 
 
 @pytest.fixture
-def writer(tmp_path: Path) -> VaultWriter:
+def writer(tmp_path: Path) -> ObsidianVaultWriter:
     vault = tmp_path / "vault"
     vault.mkdir()
-    return VaultWriter(vault)
+    return ObsidianVaultWriter(vault)
 
 
 def _dados_video() -> dict:
@@ -45,7 +45,7 @@ def _sessao() -> SimpleNamespace:
     )
 
 
-def test_salvar_palestra_conferencia_inclui_videos_citados(writer: VaultWriter, monkeypatch):
+def test_salvar_palestra_conferencia_inclui_videos_citados(writer: ObsidianVaultWriter, monkeypatch):
     monkeypatch.setattr(
         writer,
         "_resolver_video_citado",
@@ -82,7 +82,7 @@ def test_salvar_palestra_conferencia_inclui_videos_citados(writer: VaultWriter, 
     assert "**Vídeo Já Gravado**" in conteudo
 
 
-def test_salvar_palestra_conferencia_sem_videos_citados(writer: VaultWriter):
+def test_salvar_palestra_conferencia_sem_videos_citados(writer: ObsidianVaultWriter):
     analise = PalestraAnalise(
         titulo_palestra="Arquitetura de Agentes",
         resumo_executivo="Resumo de teste.",
