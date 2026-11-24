@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 import config
 from extrator import extrair_id_youtube
+from analyzer import _desduplicar_videos_citados
 
 from models import (
     AgendaScout,
@@ -745,6 +746,7 @@ class ObsidianVaultWriter:
         sessao: SessaoScout,
         analise: PalestraAnalise,
         data_leitura: str = None,
+        historico: Optional[Dict[str, Any]] = None,
     ) -> Path:
         """Cria uma nota atómica dedicada a uma palestra individual dentro da subpasta da conferência."""
         if not data_leitura:
@@ -784,7 +786,13 @@ class ObsidianVaultWriter:
         )
         org_fmt = f"([[{limpar_nome_ficheiro(sessao.organizacao)}]])" if sessao.organizacao else ""
         tag_conf = limpar_nome_ficheiro(agenda.nome_conferencia).lower().replace(" ", "-")
-
+        historico_atual = historico if historico is not None else self._carregar_historico_vault()
+        videos_citados = _desduplicar_videos_citados(getattr(analise, "videos_citados", []) or [])
+        bloco_videos_citados, videos_citados_links = self._renderizar_seccao_videos_citados(
+            videos_citados,
+            historico_atual,
+        )
+        
         frontmatter = (
             "---\n"
             "tipo: video_palestra\n"
@@ -806,6 +814,7 @@ class ObsidianVaultWriter:
             + _yaml_lista("obras", obras_links)
             + _yaml_lista("artefactos", artefactos_links)
             + _yaml_lista("organizacoes", organizacoes_links)
+            + _yaml_lista("videos_citados", videos_citados_links)
             + "---\n"
         )
 
@@ -866,6 +875,9 @@ class ObsidianVaultWriter:
             nota += "\n---\n\n## 🏷️ Temas\n"
             for tm in analise.temas:
                 nota += f"- [[{limpar_nome_ficheiro(tm)}]]\n"
+
+        if bloco_videos_citados:
+            nota += bloco_videos_citados
 
         caminho_palestra.write_text(nota, encoding="utf-8")
 

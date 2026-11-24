@@ -7,6 +7,11 @@ from models import AnaliseVideo, VideoCitado
 from vault_writer import ObsidianVaultWriter
 
 
+from types import SimpleNamespace
+
+from models import PalestraAnalise, VideoCitado
+
+
 @pytest.fixture
 def temp_vault(tmp_path: Path) -> Path:
     vault = tmp_path / "VaultTeste"
@@ -175,3 +180,135 @@ def test_salvar_video_sem_videos_citados_nao_cria_seccao(temp_vault: Path):
 
     assert "videos_citados: []" in conteudo
     assert "## 🎬 Vídeos Citados / Referenciados" not in conteudo
+    
+
+
+@pytest.fixture
+def vault_writer(tmp_path: Path) -> ObsidianVaultWriter:
+    destino_vault = tmp_path / "obsidian_vault"
+    destino_vault.mkdir(parents=True, exist_ok=True)
+    return ObsidianVaultWriter(destino_vault)
+
+
+def _payload_video() -> dict:
+    return {
+        "id": "confSession99",
+        "url": "https://youtu.be/confSession99",
+        "titulo": "Dia 2 - Sessões Técnicas",
+        "data": "2026-11-21",
+        "canal": "Tech Summit PT",
+        "canal_url": "https://youtube.com/@techsummitpt",
+    }
+
+
+def _dados_agenda() -> SimpleNamespace:
+    return SimpleNamespace(
+        nome_conferencia="Summit Engenharia",
+        dia=2,
+        dia_rotulo="Dia 2",
+        data_sessao="2026-11-21",
+    )
+
+
+def _dados_sessao() -> SimpleNamespace:
+    return SimpleNamespace(
+        ordem=3,
+        titulo_palestra="Observabilidade em Produção",
+        orador_principal="Diogo Martins",
+        organizacao="ObservaLab",
+        timestamp_inicio="01:05:00",
+        timestamp_fim="01:40:00",
+        segundos_inicio=3900,
+    )
+
+
+def test_desduplica_e_separa_links_resolvidos_de_nao_resolvidos(vault_writer: ObsidianVaultWriter, monkeypatch):
+    def _resolver_simulado(video: VideoCitado, _hist):
+        if video.url_ou_id == "vidMatch01":
+            return ("Palestra Anterior sobre Traces", "2026-09-15 - Palestra Anterior sobre Traces")
+        return (video.titulo_ou_assunto, None)
+
+    monkeypatch.setattr(vault_writer, "_resolver_video_citado", _resolver_simulado)
+
+    analise = PalestraAnalise(
+        titulo_palestra="Observabilidade em Produção",
+        resumo_executivo="Análise prática de métricas, logs e traces distribuídos.",
+        takeaways_principais=["Correlacionar traces com latência p99"],
+        videos_citados=[
+            VideoCitado(
+                titulo_ou_assunto="Palestra Anterior sobre Traces",
+                url_ou_id="vidMatch01",
+                canal_ou_orador="Canal Base",
+                contexto="baseline de referência",
+            ),
+            VideoCitado(
+                titulo_ou_assunto="Título Alternativo Mesmo Vídeo",
+                url_ou_id="vidMatch01",
+                canal_ou_orador="Canal Base",
+                contexto="duplicado pelo mesmo ID",
+            ),
+            VideoCitado(
+                titulo_ou_assunto="Demo Ainda Não Arquivada",
+                url_ou_id="vidNovo999",
+                canal_ou_orador="DemoLab",
+                contexto="exemplo complementar",
+            ),
+        ],
+    )
+
+    nota_path = vault_writer.salvar_palestra_conferencia(
+        _payload_video(),
+        _dados_agenda(),
+        _dados_sessao(),
+        analise,
+        data_leitura="2026-11-24",
+        historico={"vidMatch01": {"stem": "2026-09-15 - Palestra Anterior sobre Traces"}},
+    )
+
+    texto = nota_path.read_text(encoding="utf-8")
+    assert texto.count("**Demo Ainda Não Arquivada**") == 1
+    assert texto.count("**Palestra Anterior sobre Traces**") == 1
+    assert '"[[2026-09-15 - Palestra Anterior sobre Traces]]"' in texto
+    assert "vidNovo999" not in texto
+
+
+def test_carrega_historico_automaticamente_quando_omitido(vault_writer: ObsidianVaultWriter, monkeypatch):
+    chamadas = {"carregou": 0, "resolveu": 0}
+
+    def _carregar_mock():
+        chamadas["carregou"] += 1
+        return {"vidHistorico77": {"stem": "2026-08-10 - Nota do Histórico"}}
+
+    def _resolver_mock(_video: VideoCitado, hist):
+        chamadas["resolveu"] += 1
+        assert "vidHistorico77" in hist
+        return ("Nota do Histórico", "2026-08-10 - Nota do Histórico")
+
+    monkeypatch.setattr(vault_writer, "_carregar_historico_vault", _carregar_mock)
+    monkeypatch.setattr(vault_writer, "_resolver_video_citado", _resolver_mock)
+
+    analise = PalestraAnalise(
+        titulo_palestra="Observabilidade em Produção",
+        resumo_executivo="Resumo curto.",
+        takeaways_principais=["Ponto único"],
+        videos_citados=[
+            VideoCitado(
+                titulo_ou_assunto="Nota do Histórico",
+                url_ou_id="vidHistorico77",
+                canal_ou_orador="",
+                contexto="",
+            )
+        ],
+    )
+
+    nota_path = vault_writer.salvar_palestra_conferencia(
+        _payload_video(),
+        _dados_agenda(),
+        _dados_sessao(),
+        analise,
+        data_leitura="2026-11-24",
+    )
+
+    assert nota_path.exists()
+    assert chamadas["carregou"] == 1
+    assert chamadas["resolveu"] == 1
