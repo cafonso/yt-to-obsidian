@@ -3,7 +3,10 @@ import time
 from typing import Dict, Any, List, Optional
 from google import genai
 from google.genai import types
-from models import AnaliseVideo, SegmentoAnalise, SinteseGlobal, PessoaMencionada, ArtefactoIA, ObraCitada, AgendaScout, SessaoScout, PalestraAnalise
+from models import (
+    AnaliseVideo, SegmentoAnalise, SinteseGlobal, PessoaMencionada,
+    ArtefactoIA, ObraCitada, VideoCitado, AgendaScout, SessaoScout, PalestraAnalise  # novo
+)
 import config
 from extrator import formatar_tempo
 from canonicalizer import Canonicalizer
@@ -66,6 +69,7 @@ INSTRUÇÕES ESPECÍFICAS DE EXTRAÇÃO:
    - Classifica cada um num dos 8 subtipos: 'modelo', 'framework', 'ferramenta', 'agente', 'tecnica', 'hardware', 'plataforma', 'dataset'.
    - Indica o fabricante/autor quando conhecido. Deixa null se desconhecido.
    - Para cada artefacto, escreve 1-2 frases em português sobre o seu papel/relevância NO CONTEXTO específico.
+13. Vídeos Citados / Referenciados: Extrai APENAS vídeos explicitamente citados ou referenciados no conteúdo (resposta, continuação, entrevista, aula). Mantém o título original sem traduzir. Preenche 'url_ou_id' APENAS se constar explicitamente; nunca inventes links ou IDs.  # novo
 
 Responde estritamente de acordo com o esquema JSON fornecido.
 """
@@ -143,7 +147,21 @@ def desduplicar_strings(lista: List[str]) -> List[str]:
             resultado.append(item_limpo)
     return resultado
 
-
+def _desduplicar_videos_citados(videos: List[VideoCitado]) -> List[VideoCitado]:  # novo
+    vistos: set[str] = set()
+    resultado: List[VideoCitado] = []
+    for v in videos:
+        if not v or not v.titulo_ou_assunto or not v.titulo_ou_assunto.strip():
+            continue
+        url_id_limpo = (v.url_ou_id or "").strip().lower()
+        titulo_limpo = _chave_frase(v.titulo_ou_assunto)
+        canal_limpo = _chave_frase(v.canal_ou_orador or "")
+        chave = url_id_limpo or f"{titulo_limpo}|{canal_limpo}"
+        if chave and chave not in vistos:
+            vistos.add(chave)
+            resultado.append(v)
+    return resultado
+    
 
 def _resolver_caminhos_canonicalizacao(vault_path: Optional[str | Path] = None) -> tuple[Path, Path, Path]:
     """Devolve (aliases_path, decisoes_path, revisao_path) para o cofre ativo ou para config."""
@@ -424,6 +442,7 @@ CONTEXTO GLOBAL DO VÍDEO:
         todas_agendas = []
         todos_recursos = []
         capitulos = []
+        todos_videos_citados = []
 
         resumo_blocos_texto_lista = []
         takeaways_fallback = []
@@ -438,6 +457,7 @@ CONTEXTO GLOBAL DO VÍDEO:
             todas_tensoes.extend(seg.tensoes_e_riscos)
             todas_agendas.extend(seg.agenda_e_previsoes)
             todos_recursos.extend(seg.recursos_e_links)
+            todos_videos_citados.extend(getattr(seg, "videos_citados", []) or [])
 
             oradores_str = f" _(Oradores: {', '.join(seg.oradores_ou_apresentadores)})_" if seg.oradores_ou_apresentadores else ""
             takeaways_str = "\n    * " + "\n    * ".join(seg.takeaways_bloco) if seg.takeaways_bloco else ""
@@ -509,6 +529,7 @@ Responde estritamente de acordo com o esquema JSON fornecido.
             tensoes_e_riscos=desduplicar_strings(todas_tensoes),
             agenda_e_previsoes=desduplicar_strings(todas_agendas),
             recursos_e_links=desduplicar_strings(todos_recursos),
+            videos_citados=_desduplicar_videos_citados(todos_videos_citados),
             capitulos=capitulos,
             temas=temas_canon,
             pessoas=pessoas_canon,
@@ -620,7 +641,7 @@ DESCRIÇÃO ORIGINAL DO VÍDEO (RECURSOS, LINKS E TIMESTAMPS):
         analise.temas = canon.canonicalizar_strings("tema", analise.temas)
 
         canon.gravar()
-
+        analise.videos_citados = _desduplicar_videos_citados(analise.videos_citados)  # novo
         return analise
 
     def executar_scout(self, dados_video: Dict[str, Any]) -> AgendaScout:
@@ -708,6 +729,7 @@ INSTRUÇÕES DE EXTRAÇÃO:
 9. Obras: Livros, artigos ou papers citados com títulos originais e autores.
 10. Organizações: Empresas ou instituições chave referidas nesta palestra.
 11. Artefactos: Modelos, ferramentas, frameworks, agentes, hardware ou técnicas citados nesta palestra (com os 8 subtipos e fabricante).
+12. Vídeos Citados: Vídeos explicitamente referenciados nesta palestra (com título original sem traduzir, canal/orador se mencionado e url_ou_id apenas se explícito; nunca inventar).  # novo
 
 Responde estritamente de acordo com o esquema JSON fornecido.
 """

@@ -31,6 +31,23 @@ class ObraCitada(BaseModel):
     autores: List[str] = Field(default_factory=list, description="Lista de autor(es) da obra citada.")
     contexto: Optional[str] = Field(None, description="Breve nota sobre porque foi citado ou a ideia central retirada da obra.")
 
+class VideoCitado(BaseModel):  # novo
+    titulo_ou_assunto: str = Field(
+        description="Título oficial do vídeo na língua original (sem traduzir) ou assunto/descrição breve do vídeo referido."
+    )
+    canal_ou_orador: Optional[str] = Field(
+        None,
+        description="Canal, criador ou pessoa associada ao vídeo citado, se mencionado. None se desconhecido."
+    )
+    url_ou_id: Optional[str] = Field(
+        None,
+        description="URL ou ID do YouTube apenas se aparecer explicitamente no texto/descrição. NUNCA inventar; None se não constar."
+    )
+    contexto: Optional[str] = Field(
+        None,
+        description="Breve nota em português sobre o motivo da citação (ex: resposta, continuação, referência a entrevista/aula)."
+    )
+
 class AnaliseVideo(BaseModel):
     titulo_sugerido: str = Field(description="Título do vídeo na sua língua original (NUNCA traduzir, apenas limpar emojis excessivos ou caps lock de clickbait).")
     resumo_executivo: str = Field(description="Resumo claro dos pontos essenciais discutidos no vídeo em português (2 a 3 parágrafos).")
@@ -45,6 +62,10 @@ class AnaliseVideo(BaseModel):
     obras: List[ObraCitada] = Field(default_factory=list, description="Livros, artigos, papers e ensaios citados no vídeo com títulos originais e autores.")
     organizacoes: List[str] = Field(default_factory=list, description="Empresas, instituições, universidades ou entidades mencionadas.")
     artefactos: List[ArtefactoIA] = Field(default_factory=list, description="Modelos de IA, frameworks, ferramentas, agentes, técnicas, hardware especializado, plataformas e datasets mencionados no vídeo.")
+    videos_citados: List[VideoCitado] = Field(  # novo
+        default_factory=list,
+        description="Vídeos do YouTube ou de outras plataformas explicitamente citados ou referenciados no conteúdo."
+    )
 
 class SegmentoAnalise(BaseModel):
     timestamp_inicio: str = Field(description="Timestamp inicial do segmento, ex: '[00:00:00]' ou '[01:30:00]'.")
@@ -62,6 +83,10 @@ class SegmentoAnalise(BaseModel):
     obras: List[ObraCitada] = Field(default_factory=list, description="Obras citadas com títulos originais e autores.")
     organizacoes: List[str] = Field(default_factory=list, description="Organizações ou empresas mencionadas neste bloco.")
     artefactos: List[ArtefactoIA] = Field(default_factory=list, description="Modelos, frameworks, ferramentas, agentes, hardware, plataformas ou datasets citados.")
+    videos_citados: List[VideoCitado] = Field(  # novo
+        default_factory=list,
+        description="Vídeos do YouTube ou de outras plataformas explicitamente citados ou referenciados no conteúdo."
+    )
 
 class SinteseGlobal(BaseModel):
     titulo_sugerido: str = Field(description="Título do vídeo na língua original (limpo de clickbait).")
@@ -100,4 +125,8 @@ class PalestraAnalise(BaseModel):
     obras: List[ObraCitada] = Field(default_factory=list, description="Livros, artigos ou papers citados com títulos originais e autores.")
     organizacoes: List[str] = Field(default_factory=list, description="Organizações ou empresas mencionadas nesta palestra.")
     artefactos: List[ArtefactoIA] = Field(default_factory=list, description="Modelos, frameworks, ferramentas, hardware ou plataformas citados nesta palestra.")
+    videos_citados: List[VideoCitado] = Field(  # novo
+        default_factory=list,
+        description="Vídeos do YouTube ou de outras plataformas explicitamente citados ou referenciados no conteúdo."
+    )
 

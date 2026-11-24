@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import config
+from extrator import extrair_id_youtube
+
 from models import (
     AgendaScout,
     AnaliseVideo,
@@ -15,6 +17,7 @@ from models import (
     PalestraAnalise,
     PessoaMencionada,
     SessaoScout,
+    VideoCitado,
 )
 from utils import (
     eh_nome_valido_pessoa,
@@ -171,6 +174,38 @@ class ObsidianVaultWriter:
         if antes:
             return f"{antes}\n\n{bloco_novo}\n\n{resenha}"
         return f"{bloco_novo}\n\n{resenha}"
+        
+    def _renderizar_seccao_videos_citados(  # novo
+        self,
+        videos_citados: List[VideoCitado],
+        historico: Optional[Dict[str, Any]] = None,
+    ) -> tuple[str, List[str]]:
+        """Devolve (bloco_markdown, links_wikilink_resolvidos)."""
+        if not videos_citados:
+            return "", []
+
+        linhas = ["\n---\n\n## 🎬 Vídeos Citados / Referenciados\n"]
+        links_resolvidos: List[str] = []
+
+        for v in videos_citados:
+            rotulo, stem_existente = self._resolver_video_citado(v, historico)
+            if stem_existente:
+                links_resolvidos.append(f"[[{stem_existente}]]")
+
+            canal_raw = (v.canal_ou_orador or "").strip()
+            if canal_raw and eh_nome_valido_pessoa(canal_raw):
+                canal_fmt = f" por [[{limpar_nome_ficheiro(canal_raw)}]]"
+            elif canal_raw and eh_organizacao(canal_raw):
+                canal_fmt = f" por [[{limpar_nome_ficheiro(canal_raw)}]]"
+            elif canal_raw:
+                canal_fmt = f" ({canal_raw})"
+            else:
+                canal_fmt = ""
+
+            contexto_fmt = f" — _{v.contexto.strip()}_" if (v.contexto and v.contexto.strip()) else ""
+            linhas.append(f"- **{rotulo}**{canal_fmt}{contexto_fmt}\n")
+
+        return "".join(linhas), links_resolvidos
 
     def _adicionar_link_se_nao_existir(self, conteudo: str, seccao_titulo: str, novo_link: str) -> str:
         """Adiciona um item a uma secção do Markdown se ele ainda não estiver presente."""
@@ -205,6 +240,15 @@ class ObsidianVaultWriter:
             )
             self.salvar_ou_atualizar_pessoa(pessoa, video_link, [])
 
+    def _carregar_historico_vault(self) -> Dict[str, Any]:
+        """Carrega o histórico associado a este cofre, se existir."""
+        from main import _resolver_caminho_historico, carregar_historico
+
+        caminho_hist = _resolver_caminho_historico(Path(self.vault_path).resolve())
+        if not caminho_hist.exists():
+           return {}
+        return carregar_historico(caminho_hist) or {}
+    
     # ------------------------------------------------------------------
     # Pessoas
     # ------------------------------------------------------------------
@@ -416,7 +460,41 @@ class ObsidianVaultWriter:
 
         if fabricante:
             self._ligar_fabricante(fabricante, artefacto.nome, video_link)
+    # ------------------------------------------------------------------
+    # Vídeos
+    # ------------------------------------------------------------------
 
+    def _resolver_video_citado(  # novo
+        self,
+        video: VideoCitado,
+        historico: Optional[Dict[str, Any]] = None,
+    ) -> tuple[str, Optional[str]]:
+        hist = historico or {}
+        raw_ref = (video.url_ou_id or "").strip()
+        vid_id = extrair_id_youtube(raw_ref) if raw_ref else None
+
+        if not vid_id and raw_ref:
+            match_youtu_be = re.search(r"youtu\.be/([A-Za-z0-9_-]+)", raw_ref)
+            match_watch = re.search(r"[?&]v=([A-Za-z0-9_-]+)", raw_ref)
+            if match_youtu_be:
+                vid_id = match_youtu_be.group(1)
+            elif match_watch:
+                vid_id = match_watch.group(1)
+            elif re.fullmatch(r"[A-Za-z0-9_-]{6,20}", raw_ref):
+                vid_id = raw_ref
+
+        if vid_id and vid_id in hist:
+            entrada = hist[vid_id]
+            nota_caminho = entrada.get("nota") if isinstance(entrada, dict) else None
+            if nota_caminho:
+                stem = Path(nota_caminho).stem
+                return f"[[{stem}]]", stem
+
+        titulo = (video.titulo_ou_assunto or "").strip()
+        if raw_ref.startswith(("http://", "https://")):
+            return f"[{titulo}]({raw_ref})", None
+        return titulo, None
+ 
     # ------------------------------------------------------------------
     # Nota diária
     # ------------------------------------------------------------------
@@ -498,6 +576,12 @@ class ObsidianVaultWriter:
         artefactos_links = [f"[[{limpar_nome_ficheiro(a.nome)}]]" for a in analise.artefactos]
         organizacoes_links = [f"[[{limpar_nome_ficheiro(o)}]]" for o in organizacoes_todas]
 
+        historico_atual = self._carregar_historico_vault()  # novo
+        bloco_videos_citados, videos_citados_links = self._renderizar_seccao_videos_citados(  # novo
+            getattr(analise, "videos_citados", []) or [],  # novo
+            historico_atual,  # novo
+        )
+
         data_leitura_final = data_leitura
         if caminho_video.exists():
             conteudo_existente = caminho_video.read_text(encoding="utf-8")
@@ -518,6 +602,7 @@ class ObsidianVaultWriter:
             + _yaml_lista("temas", temas_links)
             + _yaml_lista("pessoas", pessoas_links)
             + _yaml_lista("obras", obras_links)
+            + _yaml_lista("videos_citados", videos_citados_links)
             + _yaml_lista("artefactos", artefactos_links)
             + _yaml_lista("organizacoes", organizacoes_links)
             + "---\n"
@@ -571,7 +656,10 @@ class ObsidianVaultWriter:
                 nota += f"- **[[{limpar_nome_ficheiro(o.titulo)}]]** ({o.tipo}) por {autores_fmt}{contexto_fmt}\n"
         else:
             nota += "_Nenhum livro ou artigo citado explicitamente._\n"
-
+ 
+        if bloco_videos_citados:  # novo
+            nota += bloco_videos_citados
+            
         if organizacoes_todas:
             nota += "\n---\n\n## 🏢 Organizações & Entidades\n"
             for org in organizacoes_todas:
@@ -624,6 +712,19 @@ class ObsidianVaultWriter:
 
         for a in analise.artefactos:
             self.salvar_ou_atualizar_artefacto(a, video_wikilink)
+            
+        if analise.videos_citados:  # novo
+            for v in analise.videos_citados:  # novo
+                canal_raw = (v.canal_ou_orador or "").strip()  # novo
+                if canal_raw and eh_nome_valido_pessoa(canal_raw):  # novo
+                    self.salvar_ou_atualizar_pessoa(  # novo
+                        PessoaMencionada(  # novo
+                            nome=canal_raw,  # novo
+                            papel_ou_bio=f"Referenciado no vídeo citado '{v.titulo_ou_assunto}'.",  # novo
+                        ),  # novo
+                        video_wikilink,  # novo
+                        [],  # novo
+                    )  # novo
 
         return caminho_video
 
