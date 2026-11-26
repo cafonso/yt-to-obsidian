@@ -21,6 +21,7 @@ from regras import deve_saltar
 from extrator import YouTubeExtractor, extrair_id_youtube
 from analyzer import VideoAnalyzer
 from vault_writer import ObsidianVaultWriter
+from analyzer import VideoAnalyzer, _resolver_caminhos_canonicalizacao
 
 logger = configurar_logging()
 DEFAULT_VAULT_PATH = config.DEFAULT_VAULT_PATH
@@ -277,9 +278,10 @@ def processar_ficheiro_lista(
     print("=======================================================\n")
 
 
-def mostrar_revisao_canonicalizacao() -> None:
+def mostrar_revisao_canonicalizacao(vault_path: Optional[str | Path] = None) -> None:
     """Opção 5: mostra o conteúdo de revisao.md (pares ambíguos para confirmação manual)."""
-    caminho = Path(config.REVISAO_PATH)
+    _, _, revisao_path = _resolver_caminhos_canonicalizacao(vault_path)
+    caminho = Path(revisao_path)
     if not caminho.exists():
         print("\n✓ Não há pares para revisão (revisao.md não existe ou está vazio).")
         return
@@ -291,24 +293,22 @@ def mostrar_revisao_canonicalizacao() -> None:
     print(conteudo)
 
 
-def mostrar_config_canonicalizacao() -> None:
+def mostrar_config_canonicalizacao(vault_path: Optional[str | Path] = None) -> None:
     """Opção 6: mostra os paths e thresholds usados pela canonicalização."""
-    aliases = getattr(config, "ALIASES_PATH", "aliases.yaml")
-    decisoes = getattr(config, "DECISOES_PATH", "decisoes.jsonl")
-    revisao = getattr(config, "REVISAO_PATH", "revisao.md")
+    aliases, decisoes, revisao = _resolver_caminhos_canonicalizacao(vault_path)
     thr_auto = getattr(config, "CANON_THRESHOLD_FUSAO_AUTO", 95)
     thr_rev = getattr(config, "CANON_THRESHOLD_REVISAO", 85)
     blocking = getattr(config, "CANON_BLOCKING_POR_ULTIMO_TOKEN", True)
     aprender = getattr(config, "CANON_APRENDER_ALIASES", True)
 
     print("\n📁 Canonicalização — configuração em uso:")
-    print(f"   aliases:            {Path(aliases).resolve()}")
+    print(f"   aliases:              {Path(aliases).resolve()}")
     print(f"   decisões (auditoria): {Path(decisoes).resolve()}")
-    print(f"   revisão:            {Path(revisao).resolve()}")
-    print(f"   threshold fusão:    {thr_auto}   (>= funde automaticamente)")
-    print(f"   threshold revisão:  {thr_rev}   (entre este e o de fusão vai para revisao.md)")
-    print(f"   blocking:           {'último token' if blocking else 'todos os canónicos'}")
-    print(f"   aprender aliases:   {'sim' if aprender else 'não'}")
+    print(f"   revisão:              {Path(revisao).resolve()}")
+    print(f"   threshold fusão:      {thr_auto}   (>= funde automaticamente)")
+    print(f"   threshold revisão:    {thr_rev}   (entre este e o de fusão vai para revisao.md)")
+    print(f"   blocking:             {'último token' if blocking else 'todos os canónicos'}")
+    print(f"   aprender aliases:     {'sim' if aprender else 'não'}")
 
     print("\n📄 Estado dos ficheiros:")
     for rotulo, caminho in (("aliases", aliases), ("decisões", decisoes), ("revisão", revisao)):
@@ -386,9 +386,9 @@ def menu_interativo(vault_path: str) -> None:
                 except Exception as exc:
                     print(f"! Erro ao configurar o novo Vault: {exc}")
         elif opcao == "5":
-            mostrar_revisao_canonicalizacao()
+            mostrar_revisao_canonicalizacao(vault_path)
         elif opcao == "6":
-            mostrar_config_canonicalizacao()
+            mostrar_config_canonicalizacao(vault_path)
         elif opcao == "0":
             print("\nAté breve!")
             break
@@ -413,8 +413,8 @@ def main() -> None:
             pass
 
     extrator = YouTubeExtractor()
-    analyzer = VideoAnalyzer()
-    writer = ObsidianVaultWriter(args.vault)
+    analyzer = VideoAnalyzer(vault_path=args.vault)
+    writer = ObsidianVaultWriter(args.vault) 
 
     modo_conf = "split" if args.split else ("unico" if args.unico else None)
 

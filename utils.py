@@ -86,6 +86,16 @@ def verificar_link_ativo(url: str, timeout: float = 3.5) -> bool:
     except (OSError, http.client.HTTPException):
         return False
 
+_PADROES_COLETIVO_OU_RUIDO = (
+    re.compile(r"\bet\s+al\.?\b", re.IGNORECASE),
+    re.compile(r"\b(e|and)\s+(equipa|equipe|team|outros|others)\b", re.IGNORECASE),
+    re.compile(r"^\d+[\s\-–—]+", re.IGNORECASE),
+    re.compile(
+        r"^(comunidade|equipa|equipe|team|community|coletivo|collective|delegacao|delegação)\b",
+        re.IGNORECASE,
+    ),
+)
+
 
 PALAVRAS_ORGANIZACAO = {
     "inc", "corp", "corporation", "labs", "lab", "university", "universidade",
@@ -96,6 +106,17 @@ PALAVRAS_ORGANIZACAO = {
     "ai", "ia", "llc", "ltd", "gmbh", "sa", "plc", "holdings",
     "ventures", "capital", "partners", "studio", "studios",
     "media", "network", "networks", "cloud", "compute", "semiconductor", "lda",
+    "software", "forum", "fórum", "government", "governo", "commission", "comissão",
+    "authority", "cert", "council", "conselho", "community", "comunidade",
+    "foundation", "fundação", "association", "associação", "institute",
+    "instituto", "ministério", "secretaria",
+    "e", "de", "da", "do", "das", "dos", "o", "a", "os", "as",
+    "of", "the", "and", "or", "for", "in", "on", "with", "via", "to", "from",
+}
+
+_CONECTORES_COMUNS = {
+    "e", "de", "da", "do", "das", "dos", "o", "a", "os", "as",
+    "of", "the", "and", "or", "for", "in", "on", "with", "via", "to", "from",
 }
 
 ORGANIZACOES_CONHECIDAS = {
@@ -111,14 +132,41 @@ ORGANIZACOES_CONHECIDAS = {
     "cmu", "carnegie mellon", "eth zurich", "epfl", "helmholtz",
     "deeplearning.ai", "coursera", "udacity", "kaggle",
     "latent space", "ai engineer", "canonical", "ubuntu", "linux foundation",
+    "google deepmind", "y combinator", "world economic forum", 
+    "ecma / ecma international", "python packaging authority", "wube software",
+    "cert poland", "governo de portugal", "comissão europeia", "open source",
 }
 
+def eh_coletivo_ou_ruido(nome: str) -> bool:
+    """Identifica expressões coletivas, listas com 'et al.'/'e equipa' ou fragmentos sem entidade única."""
+    nome_limpo = re.sub(r"\s+", " ", (nome or "")).strip()
+    if not nome_limpo:
+        return True
+
+    if any(padrao.search(nome_limpo) for padrao in _PADROES_COLETIVO_OU_RUIDO):
+        return True
+
+    tokens_alfanumericos = [
+        re.sub(r"^[^\w]+|[^\w]+$", "", t).lower()
+        for t in nome_limpo.split()
+    ]
+    tokens_alfanumericos = [t for t in tokens_alfanumericos if t]
+
+    if not tokens_alfanumericos:
+        return True
+
+    if all(t in _CONECTORES_COMUNS for t in tokens_alfanumericos):
+        return True
+
+    return False
 
 def eh_organizacao(nome: str) -> bool:
     """Determina se um nome corresponde a uma organização."""
-    nome_lower = nome.strip().lower()
-    if not nome_lower:
+    nome_limpo = re.sub(r"\s+", " ", (nome or "")).strip()
+    if not nome_limpo or eh_coletivo_ou_ruido(nome_limpo):
         return False
+
+    nome_lower = nome_limpo.lower()
 
     if nome_lower in ORGANIZACOES_CONHECIDAS:
         return True
@@ -127,12 +175,13 @@ def eh_organizacao(nome: str) -> bool:
         if nome_lower == org or nome_lower.startswith(org + " "):
             return True
 
-    palavras = set(re.split(r"[\s\-_.,]+", nome_lower))
+    palavras = {
+        p for p in re.split(r"[\s\-_.,/()]+", nome_lower) if p
+    }
     if palavras & PALAVRAS_ORGANIZACAO:
         return True
 
     return False
-
 
 # Palavras que, quando compõem a totalidade de um nome, indicam um conceito
 # técnico e não uma pessoa. Usadas por `eh_nome_valido_pessoa` para rejeitar
@@ -168,45 +217,42 @@ PALAVRAS_CONCEITO_TECNICO = {
     "knowledge", "execution", "action", "actions", "observation",
     "observations", "reward", "rewards", "policy", "policies",
     "environment", "environments", "simulation", "simulations",
+    "pascal", "visual", "object", "classes", "open", "source", "medalist"
     # Conectores comuns que aparecem em conceitos técnicos
     "of", "the", "and", "or", "for", "in", "on", "with", "via", "to", "from",
+    "e", "de", "da", "do", "das", "dos", "o", "a", "os", "as",
 }
 
 
 def eh_nome_valido_pessoa(nome: str) -> bool:
     """
     Valida se o nome parece um nome de pessoa real (Nome + Apelido) e não
-    uma organização ou um conceito técnico.
+    uma organização, coletivo, ruído ou conceito técnico.
 
-    Heurísticas aplicadas, por ordem:
-      1. Tem de ter ≥ 2 palavras.
-      2. Não pode ser uma organização (via `eh_organizacao`).
-      3. Todas as palavras não podem ser conceitos técnicos (via
-         `PALAVRAS_CONCEITO_TECNICO`), o que rejeita "Large Language Model",
-         "Mixture of Experts", "Chain of Thought", etc.
-         A capitalização NÃO é usada como critério — nomes de pessoas podem
-         vir em minúsculas de transcrições ASR.
+    Mantém compatibilidade com nomes em minúsculas vindos de transcrições ASR.
     """
-    nome_limpo = nome.strip()
-    if not nome_limpo:
+    nome_limpo = re.sub(r"\s+", " ", (nome or "")).strip()
+    if not nome_limpo or eh_coletivo_ou_ruido(nome_limpo):
         return False
 
-    partes = [p for p in nome_limpo.split() if p]
-    if len(partes) < 2:
+    partes = [p for p in nome_limpo.split() if re.search(r"\w", p)]
+    if len(partes) < 2 or len(partes) > 6:
         return False
 
     if eh_organizacao(nome_limpo):
         return False
 
-    # Se todas as palavras (normalizadas) são conceitos técnicos ou
-    # conectores, não é uma pessoa.
+    nome_lower = nome_limpo.lower()
+    for org in ORGANIZACOES_CONHECIDAS:
+        if len(org) >= 3 and re.search(rf"\b{re.escape(org)}\b", nome_lower):
+            return False
+
     palavras_norm = {
         re.sub(r"[^a-z0-9\-]", "", p.lower())
         for p in partes
-        if p
     }
     palavras_norm.discard("")
-    if palavras_norm and palavras_norm.issubset(PALAVRAS_CONCEITO_TECNICO):
+    if not palavras_norm or palavras_norm.issubset(PALAVRAS_CONCEITO_TECNICO):
         return False
 
     return True

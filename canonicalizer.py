@@ -365,7 +365,6 @@ class Canonicalizer:
     # API por tipo — obras
     # ------------------------------------------------------------------
 
-
     def canonicalizar_obras(self, obras: List[ObraCitada]) -> List[ObraCitada]:
         grupos: Dict[str, ObraCitada] = {}
         for o in obras:
@@ -376,22 +375,19 @@ class Canonicalizer:
                 continue
             self._registar_fusao("obra", canonical, o.titulo, decisao)
 
-            # NOVO: canonicalizar autores via o mesmo resolvedor de pessoas
-            autores_canon: List[str] = []
+            autores_final: List[str] = []
+            vistos: set[str] = set()
             for autor in (o.autores or []):
-                if not autor or not autor.strip():
+                autor_limpo = (autor or "").strip()
+                if not autor_limpo or not eh_nome_valido_pessoa(autor_limpo):
                     continue
-                autor_canon, _ = self._resolver("pessoa", autor.strip())
+                autor_canon, dec_autor = self._resolver("pessoa", autor_limpo)
                 if autor_canon:
-                    autores_canon.append(autor_canon)
-
-            # Dedup preservando ordem
-            vistos = set()
-            autores_final = []
-            for a in autores_canon:
-                if a not in vistos:
-                    vistos.add(a)
-                    autores_final.append(a)
+                    self._registar_fusao("pessoa", autor_canon, autor_limpo, dec_autor)
+                    chave_autor = norm(autor_canon)
+                    if chave_autor not in vistos:
+                        vistos.add(chave_autor)
+                        autores_final.append(autor_canon)
 
             if canonical not in grupos:
                 grupos[canonical] = ObraCitada(
@@ -402,12 +398,16 @@ class Canonicalizer:
                 )
             else:
                 atual = grupos[canonical]
-                if not atual.autores and autores_final:
-                    atual.autores = autores_final
+                vistos_atual = {norm(a) for a in (atual.autores or [])}
+                autores_fundidos = list(atual.autores or [])
+                for a in autores_final:
+                    if norm(a) not in vistos_atual:
+                        vistos_atual.add(norm(a))
+                        autores_fundidos.append(a)
+                atual.autores = autores_fundidos
                 if not atual.contexto and o.contexto:
                     atual.contexto = o.contexto
         return list(grupos.values())
-
     # ------------------------------------------------------------------
     # API por tipo — organizações e temas (strings simples)
     # ------------------------------------------------------------------

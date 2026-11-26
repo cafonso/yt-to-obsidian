@@ -11,13 +11,14 @@ Para cada vídeo ou palestra processada, é criada uma página estruturada em `V
 - **📊 Métricas & Números Chave:** Percentagens, ganhos de eficiência, dados financeiros, benchmarks e custos de *compute*.
 - **⚠️ Tensões, Riscos & Mitos Desmontados:** Contraditório, limites técnicos dos modelos e mitos desmistificados.
 - **📅 Agenda & Previsões Futuras:** Datas de lançamento anunciadas, conferências, janelas de IPOs ou cronogramas.
-- **👤 Pessoas Mencionadas:** Apenas figuras com Nome Completo deduzido (ex.: Sarah Friar, Satya Nadella), criando notas biográficas dedicadas.
+- **👤 Pessoas Mencionadas:** Apenas figuras com Nome Completo deduzido, criando notas biográficas dedicadas.
 - **📚 Livros, Artigos & Papers:** Título oficial na língua original conectado diretamente com `[[link]]` ao(s) respetivo(s) autor(es).
+- **🎬 Vídeos Citados / Referenciados:** Vídeos mencionados no conteúdo ou descrição, cruzados com o histórico do cofre para gerar `[[wikilinks]]` quando já processados.
 - **🏢 Organizações & Entidades:** Laboratórios, empresas e instituições chave.
-- **🔗 Links & Recursos Mencionados:** URLs de *papers* (arXiv), repositórios GitHub, blogs e ferramentas citadas.
+- **🔗 Links & Recursos Mencionados:** URLs de *papers* (arXiv), repositórios GitHub, blogs e ferramentas citadas (com validação opcional de disponibilidade).
 - **⏱️ Capítulos / Timestamps:** Linha temporal navegável.
-- **🏷️ Temas Abordados:** Terminologia técnica internacional (ex.: *Agentic Context*).
-- **🧩 Artefactos:** Modelos, *frameworks*, ferramentas, agentes, técnicas, *hardware*, plataformas e *datasets* (com fabricante associado).
+- **🏷️ Temas Abordados:** Terminologia técnica internacional (com tradução opcional entre parênteses).
+- **🧩 Artefactos:** Modelos, *frameworks*, ferramentas, agentes, técnicas, *hardware*, plataformas e *datasets* (com fabricante/autor associado).
 
 ## 📦 Instalação & Gestão de Dependências
 
@@ -25,73 +26,67 @@ O projeto utiliza `pyproject.toml` (padrão PEP 621) gerido nativamente pelo `uv
 
 ### Sincronizar o ambiente virtual e instalar dependências principais e de desenvolvimento
 
-```bash
+```
+bash
 uv sync
 ```
-### Instalar também a interface web (Streamlit)
-
-```bash
+### Instalar também a interface web (Streamlit) ou transcrição local com Whisper
+```Bash
 uv sync --extra ui
+uv sync --extra audio
 ```
 
 ### 1. Abrir o Menu Interativo
-
-```bash
+```
+Bash
 uv run python main.py
 ```
-
 ### 2. Processar 1 vídeo diretamente
-
-```bash
+```
+Bash
 uv run python main.py "https://www.youtube.com/watch?v=..."
 ```
-
-### 3. Processar vídeos da tua lista (apenas os novos)
-
-```bash
-uv run python main.py --lista lista_de_videos.txt
+### 3. Processar vídeos de uma lista (apenas os novos)
 ```
-
+Bash
+uv run python main.py --lista lista_videos.txt
+```
 ### 4. Forçar reprocessamento de vídeos anteriores com as novas regras
-
-```bash
-uv run python main.py --lista lista_de_videos.txt --forcar
 ```
-
+Bash
+uv run python main.py --lista lista_videos.txt --forcar
+```
 ### 5. Forçar modo conferência (dividir em notas por palestra) ou nota única
-
-```bash
+```
+Bash
 uv run python main.py "https://www.youtube.com/watch?v=..." --split
 uv run python main.py "https://www.youtube.com/watch?v=..." --unico
 ```
-
 ### 6. Usar a interface web
-
-```bash
+```
+Bash
 uv run streamlit run app.py
 ```
-
 ### 7. 🧪 Executar Testes Automatizados
+A suíte de testes unitários e de integração (com simulação de cofres Obsidian temporários) está em tests/:
 
-A suíte de testes unitários e de integração (com simulação de cofres Obsidian temporários) está em `tests/`:
-
-```bash
+```
+Bash
 uv run pytest
 ```
+## 📅 Integração com o Diário (YYYY-MM-DD.md)
+Data de leitura vs. publicação: Regista a entrada na data de visualização (hoje por defeito, ou a data indicada na lista com # YYYY-MM-DD), mantendo no metadado do vídeo a data original de publicação.
 
-## 📅 Integração com o Diário (`YYYY-MM-DD.md`)
-
-- **Data de leitura vs. publicação:** Regista a entrada na data de visualização (hoje por defeito, ou a data indicada na lista com `# YYYY-MM-DD`), mantendo no metadado do vídeo a data original de publicação.
-- **Preservação total:** Nunca apaga o que escreveste manualmente; injeta o bloco antes de `# Resenha do dia` (ou no fim do ficheiro).
+Preservação total: Nunca apaga o que escreveste manualmente; injeta o bloco antes de # Resenha do dia (ou no fim do ficheiro).
 
 ## 🛡️ Arquitetura Anti-Bloqueio & Vídeos Longos
+Fallback de áudio: Se o YouTube bloquear o endpoint de legendas, descarrega o áudio leve (.m4a) via yt-dlp e envia para o Gemini (há também o utilitário som-para-txt.py para transcrição local com faster-whisper).
 
-- **Fallback de áudio:** Se o YouTube bloquear o *endpoint* de legendas, descarrega o áudio leve (`.m4a`) via `yt-dlp` e envia para o Gemini.
-- **Pipeline Map-Reduce & The Scout:** Vídeos longos são segmentados (`ffmpeg` para áudio ou fatiamento temporal para texto). Se for conferência com vários oradores, o *The Scout* mapeia a agenda e gera notas por palestra ligadas a um Índice MOC.
+Pipeline Map-Reduce & The Scout: Vídeos longos são segmentados (ffmpeg para áudio ou fatiamento temporal para texto). Se for conferência com vários oradores, o The Scout mapeia a agenda e gera notas por palestra ligadas a um Índice MOC.
 
 ## 📁 Estrutura da aplicação
-
-```text
+```
+Plaintext
 ├── app.py               # Interface web em Streamlit (processar, revisão, histórico)
 ├── analyzer.py          # Comunicação com Gemini, retries/backoff, Map-Reduce e Scout
 ├── canonicalizer.py     # Resolução determinística e fuzzy match de entidades
@@ -100,8 +95,16 @@ uv run pytest
 ├── main.py              # CLI, menu interativo e orquestração do pipeline
 ├── models.py            # Esquemas Pydantic para Structured Outputs
 ├── README.md            # Documentação do projeto
+├── regras.py            # Regras puras de decisão (ex.: salto por histórico)
+├── som-para-txt.py      # Utilitário auxiliar de transcrição local via faster-whisper
 ├── utils.py             # Validadores de nomes de pessoas, organizações e utilitários
-├── vault_writer.py      # Escrita estruturada de notas, validação de links e diários
+├── vault_writer.py      # Fachada de compatibilidade para escrita no cofre Obsidian
+├── vault/               # Módulos especializados de escrita no cofre
+│   ├── __init__.py
+│   ├── core.py          # Orquestração central, YAML, diários e validação de links
+│   ├── entidades.py     # Notas de Pessoas, Organizações, Livros/Obras, Temas e Artefactos
+│   ├── videos.py        # Notas de vídeo e resolução de vídeos citados
+│   └── conferencias.py  # Palestras individuais, MOC e diário de conferências
 ├── pyproject.toml       # Configuração do projeto, dependências e pytest
 ├── scripts/             # Utilitários auxiliares fora do pipeline principal
 │   └── listar-modelos.py
@@ -109,21 +112,34 @@ uv run pytest
     ├── __init__.py
     ├── test_app.py
     ├── test_cofre.py
+    ├── test_conferencia_casos_limite.py
+    ├── test_conferencia_fluxo_feliz.py
     ├── test_conferencia_sem_blocos.py
     ├── test_fallback.py
+    ├── test_main_casos_limite.py
     ├── test_main_lista_split.py
     ├── test_main_menu_opcao1.py
+    ├── test_map_reduce_fluxo_feliz.py
+    ├── test_modularizacao_e_consistencia.py
     ├── test_pkm.py
+    ├── test_regras_casos_limite.py
     ├── test_retry_transitorio.py
-    └── test_vault_writer.py
+    ├── test_scout_prompt_regressao.py
+    ├── test_vault_writer.py
+    ├── test_videos_citados.py
+    └── test_videos_citados_em_conferencia.py
 ```
-
 ## 🗂️ Cofre Obsidian
+Videos/ (e subpastas por conferência com respetivo MOC)
 
-- `Videos/` (e subpastas por conferência com respetivo MOC)
-- `Pessoas/`, `Organizações/`, `Livros/`, `Temas/`, `Artefactos/`
-- `.canonicalizacao/` — estado por cofre, gerado automaticamente:
-  - `aliases.yaml` — dicionário de aliases (aprendido ao longo do tempo)
-  - `decisoes.jsonl` — auditoria de cada fusão
-  - `revisao.md` — pares ambíguos para confirmação manual
-- `YYYY-MM-DD.md` (Notas diárias)
+Pessoas/, Organizações/, Livros/, Temas/, Artefactos/
+
+.canonicalizacao/ — estado por cofre, gerado automaticamente:
+
+aliases.yaml — dicionário de aliases (aprendido ao longo do tempo)
+
+decisoes.jsonl — auditoria de cada fusão
+
+revisao.md — pares ambíguos para confirmação manual
+
+YYYY-MM-DD.md (Notas diárias)
