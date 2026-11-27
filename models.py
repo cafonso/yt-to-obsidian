@@ -130,3 +130,49 @@ class PalestraAnalise(BaseModel):
         description="Vídeos do YouTube ou de outras plataformas explicitamente citados ou referenciados no conteúdo."
     )
 
+# ---------------------------------------------------------------------------
+# Estado do pipeline (retoma de execuções interrompidas)
+# ---------------------------------------------------------------------------
+
+class ScoutResultado(BaseModel):
+    """Veredicto resumido do Scout, persistido no estado do pipeline.
+
+    Não guarda a AgendaScout completa (essa já está no cache LLM, etapa='scout').
+    Serve para auditoria e para decidir o passo seguinte sem ter de reler o cache.
+    """
+    eh_conferencia: bool
+    nome_conferencia: Optional[str] = None
+    dia: Optional[int] = None
+    dia_rotulo: Optional[str] = None
+
+
+class EstadoPipeline(BaseModel):
+    """Estado persistente de um vídeo ao longo do pipeline.
+
+    Guardado numa chave própria (etapa='pipeline_estado', modelo='__estado__'),
+    separada das chaves de cache de LLM.
+    """
+    video_id: str
+    titulo: Optional[str] = None
+
+    # Passos já concluídos, por ordem. Ex.: ["metadados", "scout", "analisar", "escrever_nota"]
+    passos_concluidos: List[str] = Field(default_factory=list)
+
+    # Veredicto do Scout (None se ainda não correu ou se não era preciso)
+    scout: Optional[ScoutResultado] = None
+
+    # Próximo passo a executar. None quando concluido=True.
+    # Valores: "scout" | "processar_conferencia" | "analisar" | "escrever_nota" | None
+    passo_seguinte: Optional[str] = None
+
+    # True quando o pipeline chegou ao fim com sucesso
+    concluido: bool = False
+
+    # True quando a síntese global caiu no fallback local
+    degradado: bool = False
+
+    # Última mensagem de erro, se o pipeline tiver falhado a meio
+    erro_ultimo_passo: Optional[str] = None
+
+    # ISO 8601 UTC da última execução (sucesso ou falha)
+    timestamp_ultima_execucao: Optional[str] = None

@@ -6,6 +6,8 @@ import datetime
 import argparse
 from pathlib import Path
 from typing import Optional
+from cache_local import CacheLocalLLM
+
 
 # Garante suporte a UTF-8 no terminal Windows para emojis e acentos
 if hasattr(sys.stdout, "reconfigure"):
@@ -65,6 +67,18 @@ def _obter_vault_de_writer(writer: ObsidianVaultWriter) -> Optional[Path]:
             return Path(valor)
     return None
 
+def _criar_cache_local(
+    vault_path: Optional[str | Path] = None,
+    sem_cache: bool = False,
+    so_cache: bool = False,
+) -> CacheLocalLLM:
+    ativo = False if sem_cache else None
+    return CacheLocalLLM(
+        vault_path=vault_path,
+        ativo=ativo,
+        apenas_leitura=so_cache and not sem_cache,
+    )
+    
 
 def processar_um_video(
     url: str,
@@ -93,6 +107,7 @@ def processar_um_video(
     print("=======================================================")
 
     dados_video = None
+    estado_video = None
     try:
         print("1/3 📥 A recolher metadados e transcrição do YouTube...")
         dados_video = extrator.extrair_tudo(url)
@@ -102,6 +117,9 @@ def processar_um_video(
             print(f"    ✓ Transcrição: {len(dados_video['transcricao'].splitlines())} linhas")
         else:
             print("    ✓ Áudio capturado para processamento nativo")
+
+        estado_video = analyzer.estado_pipeline.carregar(dados_video, forcar=forcar)
+        analyzer.estado_pipeline.guardar(dados_video, estado_video, passo_concluido="metadados")
 
         duracao = dados_video.get("duracao_segundos") or 0
         tem_transcricao = bool(dados_video.get("transcricao"))
@@ -121,14 +139,33 @@ def processar_um_video(
         if deve_verificar_scout:
             print("2/3 🧭 Vídeo longo detetado. A executar 'The Scout' para mapear a agenda da conferência...")
             try:
-                agenda = analyzer.executar_scout(dados_video)
-                if agenda.eh_conferencia and len(agenda.sessoes) > 1:
+                agenda = analyzer.executar_scout(dados_video, forcar=forcar)
+                eh_conf_mult = agenda.eh_conferencia and len(agenda.sessoes) > 1
+                analyzer.estado_pipeline.registar_scout(
+                    dados_video=dados_video,
+                    estado=estado_video,
+                    eh_conferencia=agenda.eh_conferencia,
+                    nome_conferencia=agenda.nome_conferencia,
+                    dia=agenda.dia,
+                    dia_rotulo=agenda.dia_rotulo,
+                    proximo_passo="processar_conferencia" if eh_conf_mult else "analisar",
+                )
+
+                if eh_conf_mult:
                     dia_rotulo = agenda.dia_rotulo or f"Dia {agenda.dia or 1}"
                     print(f"    ✓ Conferência detetada: '{agenda.nome_conferencia}' ({dia_rotulo})")
                     print(f"    ✓ Total de palestras identificadas: {len(agenda.sessoes)}")
 
                     caminho_moc = analyzer.processar_conferencia_completa(
-                        dados_video, agenda, writer, data_leitura
+                        dados_video, agenda, writer, data_leitura, forcar=forcar
+                    )
+
+                    analyzer.estado_pipeline.guardar(
+                        dados_video,
+                        estado_video,
+                        passo_concluido="processar_conferencia",
+                        concluido=True,
+                        erro=None,
                     )
 
                     if video_id:
@@ -149,12 +186,25 @@ def processar_um_video(
                     print("    ℹ️ O Scout determinou que este vídeo é um conteúdo contínuo (não é conferência de múltiplos oradores).")
             except Exception as e_scout:
                 print(f"    ⚠️ Scout encontrou erro ({e_scout}). A prosseguir com o pipeline normal...")
+                if estado_video:
+                    analyzer.estado_pipeline.guardar(
+                        dados_video,
+                        estado_video,
+                        proximo_passo="analisar",
+                        erro=f"scout_erro: {str(e_scout)}",
+                    )
 
         # ------------------------------------------------------------------
         # Pipeline Normal (Vídeos curtos ou monólogos longos consolidados)
         # ------------------------------------------------------------------
         print("2/3 🧠 A analisar com Gemini Flash (extração de pessoas, livros, temas)...")
-        analise = analyzer.analisar(dados_video)
+        analise = analyzer.analisar(dados_video, forcar=forcar)
+        analyzer.estado_pipeline.guardar(
+            dados_video,
+            estado_video,
+            passo_concluido="analisar",
+            proximo_passo="escrever_nota",
+        )
         print(f"    ✓ Título sugerido: {analise.titulo_sugerido}")
         print(f"    ✓ Pessoas identificadas: {len(analise.pessoas)}")
         print(f"    ✓ Obras/Livros citados: {len(analise.obras)}")
@@ -167,6 +217,14 @@ def processar_um_video(
         print("3/3 📁 A gerar teia de notas no Obsidian Vault...")
         caminho_nota = writer.salvar_video(dados_video, analise, data_leitura)
         print(f"    ✓ Nota do vídeo criada em: {caminho_nota}")
+
+        analyzer.estado_pipeline.guardar(
+            dados_video,
+            estado_video,
+            passo_concluido="escrever_nota",
+            concluido=True,
+            erro=None,
+        )
 
         # Regista no histórico para não repetir custos de API desnecessários
         if video_id:
@@ -185,6 +243,15 @@ def processar_um_video(
     except Exception as e:
         print(f"❌ Erro ao processar o vídeo {url}: {str(e)}")
         logger.exception("Falha ao processar o vídeo %s", url)
+        if dados_video and estado_video:
+            try:
+                analyzer.estado_pipeline.guardar(
+                    dados_video,
+                    estado_video,
+                    erro=str(e),
+                )
+            except Exception:
+                pass
         return False
     finally:
         # Garante que o áudio temporário é sempre apagado, mesmo em caso de erro
@@ -316,11 +383,34 @@ def mostrar_config_canonicalizacao(vault_path: Optional[str | Path] = None) -> N
         estado = f"existe ({p.stat().st_size} bytes)" if p.exists() else "não existe"
         print(f"   {rotulo}: {estado}")
 
+def mostrar_estatisticas_cache(cache: CacheLocalLLM) -> None:
+    qtd, total_bytes = cache.estatisticas()
+    estado = "desativado" if not cache.ativo else ("apenas leitura" if cache.apenas_leitura else "ativo")
+    kb = total_bytes / 1024
+    print(f"\n💾 Cache local ({estado}):")
+    print(f"   pasta:    {cache.cache_dir.resolve()}")
+    print(f"   entradas: {qtd}")
+    print(f"   tamanho:  {kb:.1f} KB ({total_bytes} bytes)")
 
-def menu_interativo(vault_path: str) -> None:
+
+def limpar_cache_local(cache: CacheLocalLLM, confirmar: bool = True) -> None:
+    qtd, _ = cache.estatisticas()
+    if qtd == 0:
+        print("\n✓ O cache local já está vazio.")
+        return
+    if confirmar:
+        resp = input(f"\nRemover {qtd} entrada(s) do cache em '{cache.cache_dir}'? [s/N]: ").strip().lower()
+        if resp not in ("s", "sim"):
+            print("Operação cancelada.")
+            return
+    removidos = cache.limpar()
+    print(f"✓ Cache limpo ({removidos} ficheiro(s) removido(s)).")
+
+def menu_interativo(vault_path: str, sem_cache: bool = False, so_cache: bool = False) -> None:
     global logger
+    cache = _criar_cache_local(vault_path, sem_cache=sem_cache, so_cache=so_cache)
     extrator = YouTubeExtractor()
-    analyzer = VideoAnalyzer()
+    analyzer = VideoAnalyzer(vault_path=vault_path, cache=cache)
     writer = ObsidianVaultWriter(vault_path)
 
     while True:
@@ -334,6 +424,7 @@ def menu_interativo(vault_path: str) -> None:
         print("4. Mudar pasta do Vault do Obsidian")
         print("5. Ver fila de revisão de canonicalização (revisao.md)")
         print("6. Ver configuração da canonicalização")
+        print("7. Ver / limpar cache local de respostas LLM")
         print("0. Sair")
         print("=" * 50)
 
@@ -378,17 +469,20 @@ def menu_interativo(vault_path: str) -> None:
                     logger = configurar_logging(novo_vault)
                     vault_path = novo_vault
                     writer = ObsidianVaultWriter(vault_path)
+                    cache = _criar_cache_local(vault_path, sem_cache=sem_cache, so_cache=so_cache)
                     if "analyzer" in locals() and analyzer is not None:
                         analyzer.vault_path = Path(vault_path)
+                        analyzer.cache = cache
                     print(f"✓ Caminho do Vault atualizado para: {os.path.abspath(vault_path)}")
                 except FileNotFoundError as exc:
-                    print(f"! {exc}")
-                except Exception as exc:
                     print(f"! Erro ao configurar o novo Vault: {exc}")
         elif opcao == "5":
             mostrar_revisao_canonicalizacao(vault_path)
         elif opcao == "6":
             mostrar_config_canonicalizacao(vault_path)
+        elif opcao == "7":
+            mostrar_estatisticas_cache(cache)
+            limpar_cache_local(cache, confirmar=True)
         elif opcao == "0":
             print("\nAté breve!")
             break
@@ -404,6 +498,9 @@ def main() -> None:
     parser.add_argument("--forcar", "-f", action="store_true", help="Forçar reprocessamento mesmo se já estiver no histórico")
     parser.add_argument("--split", action="store_true", help="Forçar modo conferência (dividir em notas por palestra)")
     parser.add_argument("--unico", action="store_true", help="Forçar nota única consolidada mesmo se for vídeo longo")
+    parser.add_argument("--sem-cache", action="store_true", help="Desativa o cache local de respostas LLM")
+    parser.add_argument("--so-cache", action="store_true", help="Lê apenas do cache local sem gravar novas entradas")
+    parser.add_argument("--limpar-cache", action="store_true", help="Limpa o cache local do cofre antes de executar")
     args = parser.parse_args()
 
     if args.vault:
@@ -412,11 +509,18 @@ def main() -> None:
         except Exception:
             pass
 
+    cache = _criar_cache_local(args.vault, sem_cache=args.sem_cache, so_cache=args.so_cache)
     extrator = YouTubeExtractor()
-    analyzer = VideoAnalyzer(vault_path=args.vault)
-    writer = ObsidianVaultWriter(args.vault) 
+    analyzer = VideoAnalyzer(vault_path=args.vault, cache=cache)
+    writer = ObsidianVaultWriter(args.vault)
+
 
     modo_conf = "split" if args.split else ("unico" if args.unico else None)
+
+    if args.limpar_cache:
+        limpar_cache_local(cache, confirmar=False)
+        if not args.url and not args.lista:
+            return
 
     if args.url:
         processar_um_video(

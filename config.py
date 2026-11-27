@@ -81,3 +81,10 @@ GEMINI_BACKOFF_BASE_503 = float(os.environ.get("GEMINI_BACKOFF_BASE_503", 5.0))
 # Se True, tenta ler o header Retry-After da resposta e respeitá-lo.
 GEMINI_RESPEITAR_RETRY_AFTER = os.environ.get("GEMINI_RESPEITAR_RETRY_AFTER", "1") == "1"
 
+# ---------------------------------------------------------------------------
+# Cache local de respostas LLM
+# ---------------------------------------------------------------------------
+CACHE_ATIVO = os.environ.get("CACHE_ATIVO", "1") == "1"
+CACHE_DIR_NAME = os.environ.get("CACHE_DIR_NAME", ".cache_llm")
+CACHE_VERSAO = os.environ.get("CACHE_VERSAO", "v1")
+

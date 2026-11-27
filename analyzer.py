@@ -13,6 +13,7 @@ from canonicalizer import Canonicalizer
 import random
 import re
 from config import FALLBACK_MODEL
+from cache_local import CacheLocalLLM, GestorEstadoPipeline
 import unicodedata
 from pathlib import Path
 
@@ -200,11 +201,23 @@ class VideoAnalyzer:
         self,
         model_name: Optional[str] = None,
         vault_path: Optional[str | Path] = None,
+        cache: Optional[CacheLocalLLM] = None,
     ):
         self.model_name = model_name or config.MODELO_GEMINI
         self.fallback_model = FALLBACK_MODEL
         self.client = genai.Client(http_options={'api_version': 'v1beta', 'timeout': 180000})
         self.vault_path = Path(vault_path) if vault_path else Path(config.DEFAULT_VAULT_PATH)
+        self.cache = cache if cache is not None else CacheLocalLLM(vault_path=self.vault_path)
+        self.estado_pipeline = GestorEstadoPipeline(self.cache)
+
+    @staticmethod
+    def _id_video_cache(dados_video: Dict[str, Any]) -> str:
+        return (
+            str(dados_video.get("id") or "")
+            or str(dados_video.get("video_id") or "")
+            or str(dados_video.get("url") or "")
+            or str(dados_video.get("titulo") or "sem_id")
+        )
   
 
     def _chamar_gemini_com_retry(self, modelo: str, conteudos: list, config_obj: types.GenerateContentConfig, max_tentativas: int = None):
@@ -377,13 +390,40 @@ class VideoAnalyzer:
 
         return segmentos
 
-    def _analisar_segmento(self, dados_video: Dict[str, Any], segmento: Dict[str, Any], idx: int, total: int) -> SegmentoAnalise:
+    def _analisar_segmento(
+        self,
+        dados_video: Dict[str, Any],
+        segmento: Dict[str, Any],
+        idx: int,
+        total: int,
+        forcar: bool = False,
+    ) -> SegmentoAnalise:
         """Executa a extração estruturada de um segmento específico (texto ou áudio) de vídeo longo."""
         ts_inicio = segmento["ts_inicio"]
         ts_fim = segmento["ts_fim"]
         texto_segmento = segmento.get("texto")
         caminho_audio_chunk = segmento.get("caminho_audio_chunk")
         dica_titulo = f"\n- Tema/Capítulo sugerido nos metadados: {segmento['titulo_sugerido']}" if segmento.get('titulo_sugerido') else ""
+
+        assinatura_fonte = (
+            f"txt:{self.cache.hash_texto(texto_segmento)}"
+            if texto_segmento
+            else f"aud:{self.cache.hash_ficheiro(caminho_audio_chunk)}"
+        )
+        assinatura = self.cache.hash_texto(
+            f"{ts_inicio}|{ts_fim}|{dica_titulo}|{assinatura_fonte}|{INSTRUCOES_EXTRACAO_COMUNS}"
+        )
+        chave = self.cache.gerar_chave(
+            etapa="segmento",
+            identificador=f"{self._id_video_cache(dados_video)}|bloco_{idx}_de_{total}",
+            modelo=self.model_name,
+            assinatura_conteudo=assinatura,
+        )
+
+        cached = self.cache.obter(chave, SegmentoAnalise, ignorar_leitura=forcar)
+        if cached is not None:
+            print(f"    ⚡ Cache hit no bloco {idx}/{total} ({ts_inicio} a {ts_fim})", flush=True)
+            return cached
 
         fonte_bloco = (
             f"TRANSCRIÇÃO DESTE BLOCO ({ts_inicio} a {ts_fim}):\n{texto_segmento}"
@@ -422,7 +462,14 @@ CONTEXTO GLOBAL DO VÍDEO:
 
             if not resp or not resp.parsed:
                 raise ValueError(f"Falha ao analisar o bloco {idx}/{total}.")
-            return resp.parsed
+
+            resultado: SegmentoAnalise = resp.parsed
+            self.cache.guardar(
+                chave,
+                resultado,
+                meta={"etapa": "segmento", "bloco": idx, "total": total, "modelo": self.model_name},
+            )
+            return resultado
         finally:
             if arquivo_google:
                 try:
@@ -430,7 +477,7 @@ CONTEXTO GLOBAL DO VÍDEO:
                 except Exception:
                     pass
 
-    def _consolidar_segmentos(self, dados_video: Dict[str, Any], segmentos_analisados: List[SegmentoAnalise]) -> AnaliseVideo:
+    def _consolidar_segmentos(self, dados_video: Dict[str, Any], segmentos_analisados: List[SegmentoAnalise], forcar: bool = False) -> AnaliseVideo:
         """Funde as entidades recolhidas em todos os blocos e gera o resumo executivo global (Reduce)."""
         todas_pessoas = []
         todas_obras = []
@@ -491,25 +538,68 @@ INSTRUÇÕES:
 
 Responde estritamente de acordo com o esquema JSON fornecido.
 """
-        config_obj = types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=SinteseGlobal,
-            temperature=0.2,
+        assinatura_sintese = self.cache.hash_texto(
+            f"{dados_video.get('titulo')}|{dados_video.get('canal')}|{resumo_blocos_texto}"
+        )
+        chave_sintese = self.cache.gerar_chave(
+            etapa="sintese_global",
+            identificador=self._id_video_cache(dados_video),
+            modelo=self.model_name,
+            assinatura_conteudo=assinatura_sintese,
         )
 
-        try:
-            resp_sintese = self._chamar_com_fallback(self.model_name, [prompt_sintese], config_obj)
-            if not resp_sintese or not resp_sintese.parsed:
-                raise ValueError("O Gemini devolveu uma resposta nula ou inválida na síntese global do vídeo longo.")
-            sintese: SinteseGlobal = resp_sintese.parsed
+        sintese = self.cache.obter(chave_sintese, SinteseGlobal, ignorar_leitura=forcar)
+        if sintese is not None:
+            print("    ⚡ Cache hit na síntese global do vídeo longo.", flush=True)
             titulo_sugerido = sintese.titulo_sugerido or dados_video.get("titulo")
             resumo_executivo = sintese.resumo_executivo
             takeaways_principais = sintese.takeaways_principais
-        except Exception as e_sintese:
-            print(f"    ⚠️ Síntese global falhou ({e_sintese}). A gerar consolidação local a partir dos blocos...", flush=True)
-            titulo_sugerido = dados_video.get("titulo")
-            resumo_executivo = "\n\n".join(seg.resumo_bloco for seg in segmentos_analisados if seg.resumo_bloco)
-            takeaways_principais = desduplicar_strings(takeaways_fallback)[:10]
+        else:
+            config_obj = types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=SinteseGlobal,
+                temperature=0.2,
+            )
+
+            try:
+                resp_sintese = self._chamar_com_fallback(self.model_name, [prompt_sintese], config_obj)
+                if not resp_sintese or not resp_sintese.parsed:
+                    raise ValueError("O Gemini devolveu uma resposta nula ou inválida na síntese global do vídeo longo.")
+                sintese = resp_sintese.parsed
+                self.cache.guardar(
+                    chave_sintese,
+                    sintese,
+                    meta={"etapa": "sintese_global", "modelo": self.model_name},
+                )
+                titulo_sugerido = sintese.titulo_sugerido or dados_video.get("titulo")
+                resumo_executivo = sintese.resumo_executivo
+                takeaways_principais = sintese.takeaways_principais
+ 
+            except Exception as e_sintese:
+                print(f"    ⚠️ Síntese global falhou ({e_sintese}). A gerar consolidação local a partir dos blocos...", flush=True)
+                titulo_sugerido = dados_video.get("titulo") or "Vídeo sem título"
+                resumo_executivo = "\n\n".join(seg.resumo_bloco for seg in segmentos_analisados if seg.resumo_bloco)
+                takeaways_principais = desduplicar_strings(takeaways_fallback)[:10]
+
+                sintese_fallback = SinteseGlobal(
+                    titulo_sugerido=titulo_sugerido,
+                    resumo_executivo=resumo_executivo,
+                    takeaways_principais=takeaways_principais,
+                )
+                self.cache.guardar(
+                    chave_sintese,
+                    sintese_fallback,
+                    meta={
+                        "etapa": "sintese_global",
+                        "modelo": "fallback_local",
+                        "degradado": True,
+                    },
+                )
+                try:
+                    estado_atual = self.estado_pipeline.carregar(dados_video)
+                    self.estado_pipeline.guardar(dados_video, estado_atual, degradado=True)
+                except Exception:
+                    pass
 
         canon = _criar_canonicalizer(self.vault_path)
 
@@ -537,7 +627,7 @@ Responde estritamente de acordo com o esquema JSON fornecido.
             organizacoes=organizacoes_canon,
             artefactos=artefactos_canon,
         )
-    def analisar_video_longo(self, dados_video: Dict[str, Any]) -> AnaliseVideo:
+    def analisar_video_longo(self, dados_video: Dict[str, Any], forcar: bool = False) -> AnaliseVideo:
         """Processa um vídeo longo dividindo-o em blocos (texto ou áudio) e consolidando no final."""
         blocos = dados_video.get("transcricao_blocos") or []
         capitulos_originais = dados_video.get("capitulos_originais") or []
@@ -578,9 +668,9 @@ Responde estritamente de acordo com o esquema JSON fornecido.
                         pass
 
         print("    🔄 A consolidar entidades e a sintetizar o resumo executivo global...")
-        return self._consolidar_segmentos(dados_video, segmentos_analisados)
+        return self._consolidar_segmentos(dados_video, segmentos_analisados, forcar=forcar)
 
-    def analisar_passo_unico(self, dados_video: Dict[str, Any]) -> AnaliseVideo:
+    def analisar_passo_unico(self, dados_video: Dict[str, Any], forcar: bool = False) -> AnaliseVideo:
         """Envia transcrição curta ou áudio + metadados ao Gemini numa única passagem."""
         caminho_audio = dados_video.get("caminho_audio")
         transcricao = dados_video.get("transcricao")
@@ -644,9 +734,24 @@ DESCRIÇÃO ORIGINAL DO VÍDEO (RECURSOS, LINKS E TIMESTAMPS):
         analise.videos_citados = _desduplicar_videos_citados(analise.videos_citados)  # novo
         return analise
 
-    def executar_scout(self, dados_video: Dict[str, Any]) -> AgendaScout:
+    def executar_scout(self, dados_video: Dict[str, Any], forcar: bool = False) -> AgendaScout:
         """Executa 'The Scout' para mapear a agenda real de uma conferência ou vídeo longo."""
         contexto_scout = self._preparar_contexto_scout(dados_video)
+        assinatura = self.cache.hash_texto(
+            f"{contexto_scout}|{dados_video.get('titulo')}|"
+            f"{config.MODELO_SCOUT}|{self.fallback_model}"
+        )
+        
+        chave = self.cache.gerar_chave(
+            etapa="scout",
+            identificador=self._id_video_cache(dados_video),
+            modelo=config.MODELO_SCOUT,
+            assinatura_conteudo=assinatura,
+        )
+        cached = self.cache.obter(chave, AgendaScout, ignorar_leitura=forcar)
+        if cached is not None:
+            print("    ⚡ Cache hit no Scout (agenda já mapeada).", flush=True)
+            return cached
 
         prompt = f"""
 És um assistente especializado em conferências de tecnologia e estruturação de eventos técnicos.
@@ -682,9 +787,25 @@ Responde estritamente de acordo com o esquema JSON fornecido.
 
         resp = self._chamar_com_fallback(config.MODELO_SCOUT, [prompt], config_obj)
 
+        # 2) Validar ANTES de guardar (a tua guarda original)
         if not resp or not resp.parsed:
-            raise ValueError("Falha ao executar o Scout sobre o vídeo.")
-        return resp.parsed
+           raise ValueError("Falha ao executar o Scout sobre o vídeo.")
+
+        resultado: AgendaScout = resp.parsed
+
+        # 3) Validação semântica mínima: o schema pode devolver um objeto vazio
+        #    (todos os campos a None/[]), o que também não deve ir para o cache.
+        if resultado.eh_conferencia is None:
+           raise ValueError("O Scout devolveu uma resposta sem o campo 'eh_conferencia'.")
+
+        # 4) Só agora guardar — e só o que passou a validação
+        self.cache.guardar(
+            chave,
+            resultado,
+            meta={"etapa": "scout", "modelo": config.MODELO_SCOUT,
+                 "eh_conferencia": resultado.eh_conferencia},
+        )
+        return resultado
 
     def analisar_palestra(
         self,
@@ -759,7 +880,9 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         dados_video: Dict[str, Any],
         agenda: AgendaScout,
         writer,
-        data_leitura: str = None
+        data_leitura: str = None,
+        forcar: bool = False
+        
     ) -> str:
         """Processa todas as palestras detetadas pelo Scout e gera as notas atómicas + MOC na subpasta dedicada."""
         blocos = dados_video.get("transcricao_blocos") or []
@@ -811,7 +934,7 @@ Responde estritamente de acordo com o esquema JSON fornecido.
 
         return str(caminho_moc)
 
-    def analisar(self, dados_video: Dict[str, Any]) -> AnaliseVideo:
+    def analisar(self, dados_video: Dict[str, Any], forcar: bool = False) -> AnaliseVideo:
         """Decide inteligentemente entre passo único (curtos) ou Map-Reduce (longos)."""
         duracao = dados_video.get("duracao_segundos") or 0
         blocos = dados_video.get("transcricao_blocos")
@@ -821,6 +944,6 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         tem_material_longo = (blocos and len(blocos) > 200) or bool(caminho_audio)
 
         if eh_longo and tem_material_longo:
-            return self.analisar_video_longo(dados_video)
+            return self.analisar_video_longo(dados_video, forcar=forcar)
         else:
-            return self.analisar_passo_unico(dados_video)
+            return self.analisar_passo_unico(dados_video, forcar=forcar)
