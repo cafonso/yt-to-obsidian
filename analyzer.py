@@ -700,28 +700,55 @@ DESCRIÇÃO ORIGINAL DO VÍDEO (RECURSOS, LINKS E TIMESTAMPS):
             temperature=0.2,
         )
 
-        arquivo_google = None
-        conteudos = [prompt]
+        assinatura_conteudo = self.cache.hash_texto(
+            "|".join([
+                str(dados_video.get("titulo") or ""),
+                str(dados_video.get("canal") or ""),
+                str(dados_video.get("data") or ""),
+                str(dados_video.get("descricao") or ""),
+                self.cache.hash_texto(transcricao) if transcricao else "",
+                self.cache.hash_ficheiro(caminho_audio) if caminho_audio else "",
+            ])
+        )
+        chave_analise = self.cache.gerar_chave(
+            etapa="analise_passo_unico",
+            identificador=self._id_video_cache(dados_video),
+            modelo=self.model_name,
+            assinatura_conteudo=assinatura_conteudo,
+        )
 
-        if caminho_audio and os.path.exists(caminho_audio):
-            print("    ☁️ A enviar áudio leve diretamente para o Gemini Flash...")
-            arquivo_google = self.client.files.upload(file=caminho_audio)
-            conteudos.append(arquivo_google)
+        analise = self.cache.obter(chave_analise, AnaliseVideo, ignorar_leitura=forcar)
+        if analise is not None:
+            print("    ⚡ Cache hit na análise em passo único.", flush=True)
+        else:
+            arquivo_google = None
+            conteudos = [prompt]
 
-        response = None
-        try:
-            response = self._chamar_com_fallback(self.model_name, conteudos, config_obj)
-        finally:
-            if arquivo_google:
-                try:
-                    self.client.files.delete(name=arquivo_google.name)
-                except Exception:
-                    pass
+            if caminho_audio and os.path.exists(caminho_audio):
+                print("    ☁️ A enviar áudio leve diretamente para o Gemini Flash...")
+                arquivo_google = self.client.files.upload(file=caminho_audio)
+                conteudos.append(arquivo_google)
 
-        if not response or not response.parsed:
-            raise ValueError("O Gemini não devolveu um resultado estruturado válido.")
+            response = None
+            try:
+                response = self._chamar_com_fallback(self.model_name, conteudos, config_obj)
+            finally:
+                if arquivo_google:
+                    try:
+                        self.client.files.delete(name=arquivo_google.name)
+                    except Exception:
+                        pass
 
-        analise: AnaliseVideo = response.parsed
+            if not response or not response.parsed:
+                raise ValueError("O Gemini não devolveu um resultado estruturado válido.")
+
+            analise = response.parsed
+            self.cache.guardar(
+                chave_analise,
+                analise,
+                meta={"etapa": "analise_passo_unico", "modelo": self.model_name},
+            )
+
         canon = _criar_canonicalizer(self.vault_path)
 
         analise.pessoas = canon.canonicalizar_pessoas(analise.pessoas)

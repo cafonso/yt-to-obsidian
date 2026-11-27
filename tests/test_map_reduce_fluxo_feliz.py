@@ -38,7 +38,7 @@ def test_analisar_video_longo_map_reduce_fluxo_feliz(tmp_path: Path, monkeypatch
             "resumo": f"Resumo do bloco {idx}",
         }
 
-    def fake_consolidar_segmentos(dados_arg: dict, segs_analisados: list) -> AnaliseVideo:
+    def fake_consolidar_segmentos(dados_arg: dict, segs_analisados: list, forcar: bool = False) -> AnaliseVideo:
             consolidacao_vista["titulo"] = dados_arg["titulo"]
             consolidacao_vista["qtd_segmentos"] = len(segs_analisados)
             return AnaliseVideo(
