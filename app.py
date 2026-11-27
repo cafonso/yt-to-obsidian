@@ -140,11 +140,12 @@ with tab_processar:
                 log_area = st.empty()
 
                 extrator = YouTubeExtractor()
-                analyzer = VideoAnalyzer()
+                analyzer = VideoAnalyzer(vault_path=vault_path)
                 writer = ObsidianVaultWriter(vault_path, validar_links=validar_links)
 
                 stream_logs = StreamlitLogStream(log_area)
                 sucessos = 0
+                avisos_detalhes = []
                 with redirect_stdout(stream_logs):     # ← NOVO (substitui try/finally + sys.stdout)
                     total = len(urls_validos)
                     for idx, url in enumerate(urls_validos, 1):
@@ -159,15 +160,32 @@ with tab_processar:
                             modo_conferencia=modo_conferencia,
                             vault_path=vault_path,
                         )
+                        vid_id = extrair_id_youtube(url)
+                        estado_vid = analyzer.estado_pipeline.carregar({"id": vid_id}) if hasattr(analyzer, "estado_pipeline") and vid_id else None
+
                         if ok:
                             sucessos += 1
+                            if estado_vid and getattr(estado_vid, "degradado", False):
+                                avisos_detalhes.append(f"⚡ `{url}`: Integrado com consolidação local (degradado).")
+                        else:
+                            msg_erro = getattr(estado_vid, "erro_ultimo_passo", None) if estado_vid else None
+                            if msg_erro:
+                                avisos_detalhes.append(f"❌ `{url}`: {msg_erro}")
+                            else:
+                                avisos_detalhes.append(f"❌ `{url}`: Falha no processamento.")
+
                         barra.progress(idx / total, text=f"Concluído {idx}/{total} vídeos")
 
-                
-                if sucessos == len(urls_validos):
+                if sucessos == len(urls_validos) and not avisos_detalhes:
                     status_box.success(f"🎉 Concluído! {sucessos}/{len(urls_validos)} vídeos integrados no Obsidian.")
+                elif sucessos == len(urls_validos):
+                    status_box.success(f"🎉 Concluído com notas informativas! {sucessos}/{len(urls_validos)} vídeos integrados.")
+                    for av in avisos_detalhes:
+                        st.warning(av)
                 else:
                     status_box.warning(f"⚠️ Terminado com avisos: {sucessos}/{len(urls_validos)} vídeos processados.")
+                    for av in avisos_detalhes:
+                        st.error(av)
 
 
 # ------------------------------------------------------------------------------

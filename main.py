@@ -243,11 +243,12 @@ def processar_um_video(
     except Exception as e:
         print(f"❌ Erro ao processar o vídeo {url}: {str(e)}")
         logger.exception("Falha ao processar o vídeo %s", url)
-        if dados_video and estado_video:
+        if dados_video:
             try:
+                estado_recarregado = analyzer.estado_pipeline.carregar(dados_video)
                 analyzer.estado_pipeline.guardar(
                     dados_video,
-                    estado_video,
+                    estado_recarregado,
                     erro=str(e),
                 )
             except Exception:

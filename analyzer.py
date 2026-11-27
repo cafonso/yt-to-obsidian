@@ -655,9 +655,30 @@ Responde estritamente de acordo com o esquema JSON fornecido.
         try:
             for i, seg in enumerate(segmentos, 1):
                 print(f"       -> [{i:02d}/{len(segmentos):02d}] A analisar bloco: {seg['ts_inicio']} a {seg['ts_fim']}...")
-                analise_bloco = self._analisar_segmento(dados_video, seg, i, len(segmentos))
+                analise_bloco = self._analisar_segmento(dados_video, seg, i, len(segmentos), forcar=forcar)
                 segmentos_analisados.append(analise_bloco)
+                try:
+                    estado_atual = self.estado_pipeline.carregar(dados_video)
+                    self.estado_pipeline.guardar(
+                        dados_video,
+                        estado_atual,
+                        passo_concluido=f"bloco_{i}_de_{len(segmentos)}",
+                        proximo_passo="consolidar" if i == len(segmentos) else f"bloco_{i+1}_de_{len(segmentos)}",
+                    )
+                except Exception:
+                    pass
                 time.sleep(1)
+        except Exception as e_bloco:
+            try:
+                estado_atual = self.estado_pipeline.carregar(dados_video)
+                self.estado_pipeline.guardar(
+                    dados_video,
+                    estado_atual,
+                    erro=f"Falha no bloco {len(segmentos_analisados) + 1}/{len(segmentos)}: {str(e_bloco)}",
+                )
+            except Exception:
+                pass
+            raise
         finally:
             for seg in segmentos:
                 chunk_path = seg.get("caminho_audio_chunk")

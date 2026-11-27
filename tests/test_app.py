@@ -150,17 +150,27 @@ def test_app_usa_vault_path_da_sidebar_em_todas_as_abas(tmp_path: Path, monkeypa
     import analyzer as analyzer_mod
     import extrator as extrator_mod
 
+    vault_passado_ao_analyzer = []
+
+    def fake_video_analyzer(vault_path=None, **kwargs):
+        vault_passado_ao_analyzer.append(vault_path)
+        return SimpleNamespace(estado_pipeline=SimpleNamespace(carregar=lambda _d: None))
+
     monkeypatch.setattr(main_mod, "processar_um_video", fake_processar_um_video)
     monkeypatch.setattr(extrator_mod, "YouTubeExtractor", lambda: object())
-    monkeypatch.setattr(analyzer_mod, "VideoAnalyzer", lambda: object())
+    monkeypatch.setattr(analyzer_mod, "VideoAnalyzer", fake_video_analyzer)
 
     app_file = Path(__file__).resolve().parent.parent / "app.py"
     runpy.run_path(str(app_file), run_name="__main__")
 
-    # 1. Verifica se processar_um_video recebeu o vault_path da sidebar
+    # 1. Verifica se VideoAnalyzer recebeu o vault_path da sidebar
+    assert len(vault_passado_ao_analyzer) == 1
+    assert str(vault_passado_ao_analyzer[0]) == str(vault_custom)
+
+    # 2. Verifica se processar_um_video recebeu o vault_path da sidebar
     assert len(chamadas_processar) == 1
     assert chamadas_processar[0]["vault_path"] == str(vault_custom)
 
-    # 2. Verifica se a aba Histórico carregou o registo do cofre customizado sem TypeError
+    # 3. Verifica se a aba Histórico carregou o registo do cofre customizado sem TypeError
     assert len(fake_st.dataframes) == 1
     assert fake_st.dataframes[0][0]["ID"] == "abc123def45"

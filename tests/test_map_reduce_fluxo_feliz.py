@@ -29,7 +29,7 @@ def test_analisar_video_longo_map_reduce_fluxo_feliz(tmp_path: Path, monkeypatch
 
     monkeypatch.setattr(analyzer, "_fatiar_transcricao", lambda _blocos, _caps: segmentos_fake)
 
-    def fake_analisar_segmento(dados_arg: dict, seg_arg: dict, idx: int, total: int) -> dict:
+    def fake_analisar_segmento(dados_arg: dict, seg_arg: dict, idx: int, total: int, forcar: bool = False) -> dict:
         segmentos_vistos.append((idx, total, seg_arg["ts_inicio"]))
         return {
             "indice": idx,
